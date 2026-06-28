@@ -25,7 +25,9 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # generous headroom for the first cold run (TMDB cache built from scratch);
+    # later runs restore the cache and finish in a couple of minutes
+    timeout-minutes: 45
     env:
       # guarantee the '★' in pick reasons prints under any runner locale
       PYTHONUTF8: "1"
