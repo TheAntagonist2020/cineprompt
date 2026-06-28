@@ -1,0 +1,98 @@
+name: Update & Deploy Cineprompt
+
+# Keeps the live site current with what you've watched, with no manual steps:
+#   - on a schedule: re-pull Trakt -> rebuild the unseen-picks engine -> deploy
+#   - on manual "Run workflow": same (force a refresh on demand)
+#   - on push to main: redeploy code changes (no API rebuild)
+on:
+  schedule:
+    # Cron is ALWAYS UTC and ignores DST. Central is UTC-5 (CDT) / UTC-6 (CST).
+    - cron: "17 13 * * *"   # ~morning CT (08:17 CDT / 07:17 CST)
+    - cron: "17 22 * * *"   # ~late afternoon CT (17:17 CDT / 16:17 CST)
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+
+# Read-only token: we deploy to Cloudflare and never commit back to the repo.
+permissions:
+  contents: read
+
+# Don't let an overlapping scheduled run clobber the cache mid-write.
+concurrency:
+  group: update-cineprompt
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # guarantee the '★' in pick reasons prints under any runner locale
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Persist AND update the TMDB metadata cache across runs.
+      # A cache key is immutable, so the key rotates (run_id) to write a fresh
+      # entry every run, while restore-keys pulls the most recent prior copy as
+      # a warm-start seed. First ever run is cold (fetches metadata live).
+      - name: Restore TMDB cache
+        uses: actions/cache@v6
+        with:
+          path: datagen/.tmdb_cache.json
+          key: tmdb-cache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            tmdb-cache-${{ runner.os }}-
+
+      - name: Install JS deps
+        run: npm ci
+
+      # Rebuild recommendations from your live Trakt history.
+      # Skipped on plain code pushes (those just redeploy the committed data).
+      - name: Rebuild recommendation data
+        if: github.event_name != 'push'
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_USER: ${{ secrets.TRAKT_USER }}
+        run: python datagen/rebuild.py
+
+      # Client-only build (dist/public). Avoids coupling the static deploy to
+      # the Express server bundle, which Pages never ships.
+      - name: Build site
+        run: npm run build:client
+
+      # In CI, `wrangler pages deploy` will NOT auto-create the project, so
+      # create it first. Tolerate ONLY the "already exists" case — a real auth
+      # failure (bad token / account id) surfaces here instead of being masked.
+      - name: Ensure Pages project exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if ! npx wrangler@4 pages project create cineprompt --production-branch=main 2>err.log; then
+            cat err.log
+            grep -qi "already" err.log || { echo "::error::Pages project create failed (check CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)"; exit 1; }
+            echo "Project already exists — continuing."
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: pages deploy dist/public --project-name=cineprompt --branch=main

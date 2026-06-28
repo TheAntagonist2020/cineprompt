@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.vite/
+
+# SQLite database files — never commit; exposes demo data at rest
+data.db
+data.db-shm
+data.db-wal
+data.db-journal
+
+.env
+.env.*
+!.env.example
+
+# never commit live OAuth tokens, wherever they land
+**/.trakt_token.json
+
+# generated-data backups (kept out of client/public so they never ship)
+data-backups/
+
+*.log
+.DS_Store

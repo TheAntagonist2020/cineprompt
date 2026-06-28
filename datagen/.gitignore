@@ -1,0 +1,4 @@
+.env
+.trakt_token.json
+.tmdb_cache.json
+__pycache__/

@@ -1,0 +1,6 @@
+# Cloudflare Pages config for Cineprompt.
+# `wrangler pages deploy` reads pages_build_output_dir, so you can deploy with
+# just `npx wrangler pages deploy` after `npm run build`.
+name = "cineprompt"
+pages_build_output_dir = "dist/public"
+compatibility_date = "2026-06-28"
