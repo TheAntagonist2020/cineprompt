@@ -20,3 +20,7 @@ data-backups/
 
 *.log
 .DS_Store
+
+# local wrangler dev vars (LOCAL_DEV bypass)
+.dev.vars
+.wrangler/

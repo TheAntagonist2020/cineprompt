@@ -17,6 +17,7 @@ import {
 } from "@/components/film-ui";
 import { LoadingScreen } from "@/components/layout";
 import { MoodStrip } from "@/components/mood-strip";
+import { useFilmState } from "@/lib/filmState";
 import {
   useMood,
   moodMetaByIds,
@@ -91,6 +92,7 @@ const QUICK_NAV = [
 export default function Today() {
   const { data, loading } = useAppData();
   const modal = useFilmModal();
+  const fs = useFilmState();
   const { activeMoods } = useMood();
   const [shuffleSeed, setShuffleSeed] = useState<number>(0);
   const [spinning, setSpinning] = useState(false);
@@ -129,6 +131,28 @@ export default function Today() {
     focus = pick(focusPool, shuffleSeed, 3);
     background = pick(bgPool, shuffleSeed * 7 + 3, 2).map(withKind);
   }
+
+  // Drop films you've said "not tonight" / dismissed / watched, and backfill the
+  // focus row from the queue so there's always something decisive to put on.
+  const usedIds = new Set<number>();
+  const keep = (arr: typeof focus) =>
+    arr.filter((f) => {
+      if (fs.isHidden(f.tmdb_id) || usedIds.has(f.tmdb_id)) return false;
+      usedIds.add(f.tmdb_id);
+      return true;
+    });
+  focus = keep(focus);
+  if (!moodActive && focus.length < 3) {
+    const pool = [...(data.queue ?? []), ...(data.focus_pool_extra ?? [])];
+    for (const f of pool) {
+      if (focus.length >= 3) break;
+      if (!fs.isHidden(f.tmdb_id) && !usedIds.has(f.tmdb_id)) {
+        usedIds.add(f.tmdb_id);
+        focus.push(f);
+      }
+    }
+  }
+  background = background.filter((f) => !fs.isHidden(f.tmdb_id));
 
   function reroll() {
     setShuffleSeed((s) => s + 1);

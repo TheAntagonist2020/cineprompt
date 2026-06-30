@@ -14,6 +14,7 @@ import {
   Aperture,
   Tag,
   Menu,
+  Bookmark,
 } from "lucide-react";
 import {
   Sheet,
@@ -35,6 +36,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "Today", icon: Clapperboard, match: (p) => p === "/" },
   { href: "/week", label: "Week", icon: CalendarDays, match: (p) => p === "/week" || p.startsWith("/week/") },
   { href: "/queue", label: "Queue", icon: ListVideo, match: (p) => p.startsWith("/queue") },
+  { href: "/shortlist", label: "Shortlist", icon: Bookmark, match: (p) => p.startsWith("/shortlist") },
   { href: "/background", label: "Background", icon: Tv, match: (p) => p.startsWith("/background") },
   { href: "/blindspots", label: "Blind Spots", icon: Compass, match: (p) => p.startsWith("/blindspots") },
   { href: "/directors", label: "Directors", icon: Users, match: (p) => p.startsWith("/directors") },

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import { ExternalLink, Star, StarHalf, X, Play, Repeat, Waves } from "lucide-react";
+import { ExternalLink, Star, StarHalf, X, Play, Repeat, Waves, Moon, Bookmark, BookmarkCheck, Check, RotateCcw } from "lucide-react";
+import { useFilmState } from "@/lib/filmState";
 import {
   actionLinks,
   posterUrl,
@@ -291,6 +292,82 @@ export function ActionButtons({
   );
 }
 
+// ---------- Stateful actions (Not tonight / Shortlist / Watched) ----------
+export function FilmActions({
+  film,
+  className = "",
+}: {
+  film: { tmdb_id: number };
+  className?: string;
+}) {
+  const fs = useFilmState();
+  if (!fs.available) return null; // no backend (e.g. Express dev) -> hide
+  const id = film.tmdb_id;
+  const shortlisted = fs.isShortlisted(id);
+  const watched = fs.isWatched(id);
+  const cleared = !fs.get(id)?.status && !fs.get(id)?.snooze_until;
+
+  const Btn = ({
+    onClick,
+    active,
+    icon,
+    label,
+    testid,
+  }: {
+    onClick: () => void;
+    active?: boolean;
+    icon: ReactNode;
+    label: string;
+    testid: string;
+  }) => (
+    <button
+      onClick={onClick}
+      data-testid={testid}
+      className={`inline-flex items-center gap-1.5 border px-3 py-2 font-sans text-sm font-medium tracking-wide rounded-sm transition-colors duration-200 ${
+        active
+          ? "border-primary/60 bg-primary/15 text-primary"
+          : "border-border bg-card/60 text-foreground/85 hover:border-primary/50 hover:text-primary"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
+  return (
+    <div className={`flex flex-wrap gap-2 ${className}`} data-testid={`film-actions-${id}`}>
+      <Btn
+        testid={`action-snooze-${id}`}
+        onClick={() => fs.snooze(id)}
+        icon={<Moon className="h-3.5 w-3.5" />}
+        label="Not tonight"
+      />
+      <Btn
+        testid={`action-shortlist-${id}`}
+        onClick={() => fs.toggleShortlist(id)}
+        active={shortlisted}
+        icon={shortlisted ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
+        label={shortlisted ? "Shortlisted" : "Shortlist"}
+      />
+      <Btn
+        testid={`action-watched-${id}`}
+        onClick={() => fs.markWatched(id)}
+        active={watched}
+        icon={<Check className="h-3.5 w-3.5" />}
+        label={watched ? "Watched" : "Mark watched"}
+      />
+      {!cleared && (
+        <Btn
+          testid={`action-clear-${id}`}
+          onClick={() => fs.clear(id)}
+          icon={<RotateCcw className="h-3.5 w-3.5" />}
+          label="Undo"
+        />
+      )}
+    </div>
+  );
+}
+
 // ---------- Reasons / rationale ----------
 export function Rationale({
   reasons,
@@ -455,7 +532,8 @@ export function FilmDetailModal({
             </div>
           )}
 
-          <div className="mt-7 pt-6 border-t border-border">
+          <div className="mt-7 pt-6 border-t border-border space-y-4">
+            <FilmActions film={film} />
             <ActionButtons film={film} />
           </div>
         </div>

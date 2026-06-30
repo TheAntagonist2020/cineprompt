@@ -6,10 +6,12 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout } from "@/components/layout";
 import { MoodProvider } from "@/lib/mood";
+import { FilmStateProvider } from "@/lib/filmState";
 import Today from "@/pages/today";
 import Week from "@/pages/week";
 import Background from "@/pages/background";
 import Queue from "@/pages/queue";
+import Shortlist from "@/pages/shortlist";
 import BlindSpots from "@/pages/blindspots";
 import Directors from "@/pages/directors";
 import DirectorDetail from "@/pages/director-detail";
@@ -37,6 +39,7 @@ function AppRouter() {
           <Route path="/week" component={Week} />
           <Route path="/background" component={Background} />
           <Route path="/queue" component={Queue} />
+          <Route path="/shortlist" component={Shortlist} />
           <Route path="/blindspots" component={BlindSpots} />
           <Route path="/directors" component={Directors} />
           <Route path="/directors/:name" component={DirectorDetail} />
@@ -57,13 +60,15 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <MoodProvider>
-          <Router hook={useHashLocation}>
-            <Layout>
-              <AppRouter />
-            </Layout>
-          </Router>
-        </MoodProvider>
+        <FilmStateProvider>
+          <MoodProvider>
+            <Router hook={useHashLocation}>
+              <Layout>
+                <AppRouter />
+              </Layout>
+            </Router>
+          </MoodProvider>
+        </FilmStateProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
