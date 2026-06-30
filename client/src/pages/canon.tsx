@@ -28,7 +28,10 @@ export default function Canon() {
   if (loading || !data) return <LoadingScreen />;
 
   const canon = data.canon ?? {};
-  const lists = LIST_ORDER.filter((l) => Array.isArray(canon[l.key]));
+  // Prefer the data-driven order/names (canon_meta, written by build_lists.py);
+  // fall back to the built-in order for older data.
+  const order = data.canon_meta?.length ? data.canon_meta : LIST_ORDER;
+  const lists = order.filter((l) => Array.isArray(canon[l.key]));
 
   return (
     <PageShell
@@ -79,7 +82,7 @@ export default function Canon() {
       {open && Array.isArray(canon[open]) && (
         <CanonGrid
           key={open}
-          name={LIST_ORDER.find((l) => l.key === open)?.name ?? open}
+          name={order.find((l) => l.key === open)?.name ?? open}
           films={canon[open]}
         />
       )}
@@ -88,8 +91,11 @@ export default function Canon() {
 }
 
 function CanonGrid({ name, films }: { name: string; films: CanonFilm[] }) {
-  // Seen first within a stable original order, but keep visual grouping subtle:
-  // just render in given order with badges.
+  // Cap the initial render so expanding a 1,700-title list stays snappy; the
+  // counts/percentages above are still computed over the full list.
+  const CAP = 600;
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? films : films.slice(0, CAP);
   return (
     <div className="mt-10 animate-in fade-in duration-300" data-testid="canon-grid">
       <div className="flex items-center gap-4 mb-6">
@@ -99,7 +105,7 @@ function CanonGrid({ name, films }: { name: string; films: CanonFilm[] }) {
         <span className="h-px flex-1 bg-border" />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        {films.map((f, i) => {
+        {shown.map((f, i) => {
           const href = f.seen
             ? f.tmdb_id
               ? letterboxdTmdbUrl(f.tmdb_id)
@@ -146,6 +152,15 @@ function CanonGrid({ name, films }: { name: string; films: CanonFilm[] }) {
           );
         })}
       </div>
+      {!showAll && films.length > CAP && (
+        <button
+          onClick={() => setShowAll(true)}
+          data-testid="canon-show-all"
+          className="mt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-primary/80 hover:text-primary border border-primary/30 hover:border-primary/60 rounded-sm px-4 py-2 transition-colors"
+        >
+          Show all {films.length} titles ↓
+        </button>
+      )}
     </div>
   );
 }

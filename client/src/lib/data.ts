@@ -284,6 +284,7 @@ export interface AppData {
   // ---------- v4 (all optional) ----------
   version?: string;
   canon?: Canon;
+  canon_meta?: { key: string; name: string }[];
   review_quotes?: Record<string, ReviewQuote>;
   director_quotes?: Record<string, ReviewQuote[]>;
   craft_dimensions?: CraftDimensions;
