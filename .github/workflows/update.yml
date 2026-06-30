@@ -72,6 +72,16 @@ jobs:
           TRAKT_USER: ${{ secrets.TRAKT_USER }}
         run: python datagen/rebuild.py
 
+      # Push the current picks to the "Cineprompt — Tonight" MDBList list, which
+      # surfaces in Stremio. Non-fatal: a MDBList hiccup must not block the deploy.
+      - name: Sync picks to MDBList (Stremio)
+        if: github.event_name != 'push'
+        continue-on-error: true
+        env:
+          MDBLIST_API_KEY: ${{ secrets.MDBLIST_API_KEY }}
+          PYTHONUTF8: "1"
+        run: python datagen/mdblist_sync.py
+
       # Client-only build (dist/public). Avoids coupling the static deploy to
       # the Express server bundle, which Pages never ships.
       - name: Build site
