@@ -95,7 +95,8 @@ def main(base_path, out_path, enrich=False):
     tmdb = TMDB()
 
     print(f"Pulling Trakt data for {USER}...")
-    watched = trakt_get(f"/users/{USER}/watched/movies")[0] or []
+    # /watched/movies is paginated (100/page); page through it all.
+    watched = trakt_paged(f"/users/{USER}/watched/movies", {"limit": 100}, page_limit=200) or []
     ratings = trakt_get(f"/users/{USER}/ratings/movies")[0] or []
     stats = trakt_get(f"/users/{USER}/stats")[0] or {}
     print(f"  watched={len(watched)} ratings={len(ratings)}")

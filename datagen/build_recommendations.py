@@ -79,11 +79,45 @@ CANON_LABEL = {
     "sight_and_sound_2022": "Sight & Sound 2022",
     "afi_100": "AFI 100",
     "criterion": "Criterion Collection",
+    "bespoke_canon": "your Bespoke Canon",
+    "lb_greats": "your Letterboxd Greats",
+    "all_killer": "All Killer No Filler",
+    "mubi": "MUBI",
+    "surreal": "Surreal, Psychedelic & Mind-Bending",
+    "films_1970s": "1000 Films: the 70s",
 }
 CANON_BONUS = {
     "sight_and_sound_2022": 16, "best_picture": 12,
     "criterion": 12, "afi_100": 10,
+    # your own curated lists — weighted like canon so genre picks compete
+    "bespoke_canon": 16, "all_killer": 13, "lb_greats": 12,
+    "mubi": 11, "surreal": 10, "films_1970s": 9,
 }
+
+# Genre/pulp signal — the crime, horror, thriller and genre pictures that keep
+# the slate from reading like homework.
+PULP_GENRES = {"Horror", "Thriller", "Action", "Crime", "Science Fiction",
+               "Mystery", "Western"}
+PULP_GENRE_IDS = {"Horror": 27, "Thriller": 53, "Crime": 80,
+                  "Science Fiction": 878, "Action": 28}
+CANON_CAND_CAP = 300   # max candidates pulled from any single canon list (cost bound)
+# Target tonal mix for the focus pool — intersperse the pulp, don't bury it.
+REGISTER_TARGET = {"pulp": 0.40, "middle": 0.30, "heavy": 0.30}
+
+
+def register(f):
+    """Tonal register: 'heavy' (arthouse/challenge), 'pulp' (genre), 'middle'."""
+    g = set(f.get("genres", []))
+    lang = f.get("original_language") or ""
+    yr = int(f["year"]) if str(f.get("year", "")).isdigit() else 0
+    rt = f.get("runtime") or 0
+    # Genre-forward AND watchable (English or modern), not an epic -> pulp.
+    if (g & PULP_GENRES) and (lang == "en" or yr >= 1968) and rt < 150:
+        return "pulp"
+    # Very long, or older/serious world cinema, or any remaining foreign -> heavy.
+    if rt >= 155 or (lang and lang != "en"):
+        return "heavy"
+    return "middle"
 
 
 def lang_name(code):
@@ -95,7 +129,9 @@ def pull_trakt():
     if not CID:
         sys.exit("Set TRAKT_CLIENT_ID in datagen/.env")
     print(f"Pulling Trakt taste profile for {USER}...")
-    watched = trakt_get(f"/users/{USER}/watched/movies")[0] or []
+    # /watched/movies is paginated (100/page) — page through it all, or the
+    # watched set silently truncates to 100 and every "unseen" pick is wrong.
+    watched = trakt_paged(f"/users/{USER}/watched/movies", {"limit": 100}, page_limit=200) or []
     ratings = trakt_get(f"/users/{USER}/ratings/movies")[0] or []
     stats = trakt_get(f"/users/{USER}/stats")[0] or {}
     history = trakt_paged(f"/users/{USER}/history/movies", {"limit": 100}, page_limit=15)
@@ -193,13 +229,18 @@ def gather_candidates(tmdb, base, prof, enr):
     watched = prof["watched_ids"]
     cand = defaultdict(lambda: {"sources": set(), "canon": set()})
 
-    # 1) canon lists already in the data — unseen entries are prime challenges
+    # 1) canon lists already in the data — unseen entries are prime challenges.
+    #    Includes your curated MDBList lists (genre/pulp), capped per list.
     for list_key, films in (base.get("canon") or {}).items():
+        n = 0
         for f in films:
             tid = f.get("tmdb_id")
             if tid and tid not in watched:
                 cand[tid]["sources"].add("canon")
                 cand[tid]["canon"].add(list_key)
+                n += 1
+                if n >= CANON_CAND_CAP:
+                    break
 
     # 2) unseen filmographies of directors you rate highly
     loved_top = enr["loved"][:24]
@@ -259,6 +300,20 @@ def gather_candidates(tmdb, base, prof, enr):
         tid = r.get("id")
         if tid and tid not in watched:
             cand[tid]["sources"].add("canonical")
+
+    # 6) genre/pulp discovery — acclaimed crime, horror, thriller, sci-fi, action
+    #    (cult-friendly vote floor) so the pool has real genre to intersperse.
+    for name, gid in PULP_GENRE_IDS.items():
+        results = tmdb.discover({
+            "sort_by": "vote_average.desc",
+            "vote_count.gte": 600,
+            "with_genres": str(gid),
+            "with_runtime.gte": MIN_RUNTIME,
+        }, pages=2)
+        for r in results:
+            tid = r.get("id")
+            if tid and tid not in watched:
+                cand[tid]["sources"].add(f"genre::{name}")
 
     print(f"  {len(cand)} distinct unseen candidates gathered.")
     return cand
@@ -397,8 +452,19 @@ def build(base_path, out_path):
     base = json.load(open(base_path, encoding="utf-8"))
     tmdb = TMDB()
     prof = pull_trakt()
-    enr = enrich(tmdb, prof)
     watched = prof["watched_ids"]
+
+    # Guard against a partial / rate-limited Trakt pull: if the watched set came
+    # back far smaller than what's already on record, the "unseen" filter would
+    # be wrong and we'd recommend films you've seen. Abort rather than ship it.
+    prev_watched = len(base.get("watched_tmdb_set", []))
+    if prev_watched >= 500 and len(watched) < prev_watched * 0.7:
+        sys.exit(
+            f"Trakt pull looks partial: {len(watched)} watched vs {prev_watched} "
+            f"on record. Aborting so degraded data isn't written (try again shortly)."
+        )
+
+    enr = enrich(tmdb, prof)
 
     cand = gather_candidates(tmdb, base, prof, enr)
 
@@ -428,27 +494,51 @@ def build(base_path, out_path):
     scored.sort(key=lambda x: x[0], reverse=True)
     print(f"  {len(scored)} candidates passed the quality floor.")
 
-    # --- assemble focus pools with a per-director cap for breadth -----------
-    focus, dir_count, used = [], Counter(), set()
-    for sc, f in scored:
-        if f["tmdb_id"] in used:
-            continue
-        ds = f.get("directors") or ["?"]
-        if any(dir_count[d] >= PER_DIRECTOR_CAP for d in ds):
-            continue
-        for d in ds:
+    # --- assemble focus pool: QUOTA by tonal register so the pulp is
+    #     interspersed, not buried under prestige; per-director cap for breadth ---
+    total = FOCUS_QUEUE + FOCUS_EXTRA
+    targets = {r: max(1, round(total * frac)) for r, frac in REGISTER_TARGET.items()}
+    buckets = {"pulp": [], "middle": [], "heavy": []}
+    dir_count, used = Counter(), set()
+
+    def eligible(f):
+        return not any(dir_count[d] >= PER_DIRECTOR_CAP for d in (f.get("directors") or ["?"]))
+
+    def take(f):
+        for d in (f.get("directors") or ["?"]):
             dir_count[d] += 1
         used.add(f["tmdb_id"])
-        focus.append(f)
-        if len(focus) >= FOCUS_QUEUE + FOCUS_EXTRA:
-            break
-    # if the cap left us short, top up ignoring the cap
-    if len(focus) < FOCUS_QUEUE + FOCUS_EXTRA:
+
+    # Pass 1: fill each register to its target from the highest-scored candidates.
+    for sc, f in scored:
+        if f["tmdb_id"] in used or not eligible(f):
+            continue
+        r = register(f)
+        if len(buckets[r]) >= targets[r]:
+            continue
+        take(f); buckets[r].append(f)
+
+    # Pass 2: if a register ran dry, backfill from the remaining best.
+    combined = buckets["pulp"] + buckets["heavy"] + buckets["middle"]
+    if len(combined) < total:
         for sc, f in scored:
-            if f["tmdb_id"] not in used:
-                used.add(f["tmdb_id"]); focus.append(f)
-                if len(focus) >= FOCUS_QUEUE + FOCUS_EXTRA:
-                    break
+            if f["tmdb_id"] in used or not eligible(f):
+                continue
+            take(f); combined.append(f)
+            if len(combined) >= total:
+                break
+
+    # Round-robin interleave (lead pulp) so the queue alternates registers
+    # instead of frontloading 30 arthouse films.
+    final = combined[:total]
+    by_reg = {"pulp": [], "heavy": [], "middle": []}
+    for f in final:
+        by_reg[register(f)].append(f)
+    focus, ri = [], {"pulp": 0, "heavy": 0, "middle": 0}
+    while len(focus) < len(final):
+        for r in ("pulp", "heavy", "middle"):
+            if ri[r] < len(by_reg[r]):
+                focus.append(by_reg[r][ri[r]]); ri[r] += 1
     queue = focus[:FOCUS_QUEUE]
     focus_extra = focus[FOCUS_QUEUE:FOCUS_QUEUE + FOCUS_EXTRA]
 
@@ -595,16 +685,43 @@ def build(base_path, out_path):
     mood_pool = queue + focus_extra + background
     mood_picks = build_mood_picks(meta_ids, mood_pool)
 
-    # --- slates: 14-day window from the fresh pools ------------------------
-    fr = seeded_shuffle(queue + focus_extra, today.toordinal())
-    br = seeded_shuffle(background, today.toordinal() + 7) or fr
+    # --- slates: 14-day window. Each day is a deliberate MIX of registers so a
+    #     night reads as "a challenge + a genre pick + a wildcard", not homework.
+    #     The leading register rotates daily so today's #1 isn't always arthouse.
+    reg_pool = {"pulp": [], "heavy": [], "middle": []}
+    for f in (queue + focus_extra):
+        reg_pool[register(f)].append(f)
+    seedbase = today.toordinal()
+    reg_pool["heavy"] = seeded_shuffle(reg_pool["heavy"], seedbase + 1)
+    reg_pool["pulp"] = seeded_shuffle(reg_pool["pulp"], seedbase + 2)
+    reg_pool["middle"] = seeded_shuffle(reg_pool["middle"], seedbase + 3)
+    br = seeded_shuffle(background, seedbase + 7)
+    all_focus = seeded_shuffle(queue + focus_extra, seedbase)  # fallback
+
+    BASE_PLAN = ["heavy", "pulp", "middle"]
+    ri = {"heavy": 0, "pulp": 0, "middle": 0}
     slates = []
     for n in range(14):
         day = today + timedelta(days=n)
+        plan = BASE_PLAN[n % 3:] + BASE_PLAN[:n % 3]
+        trio = []
+        for r in plan:
+            pool = reg_pool[r]
+            if pool:
+                trio.append(pool[ri[r] % len(pool)]); ri[r] += 1
+        # backfill from the shuffled union if a register was empty
+        k = 0
+        while len(trio) < 3 and all_focus:
+            c = all_focus[(n * 3 + k) % len(all_focus)]
+            if c["tmdb_id"] not in {t["tmdb_id"] for t in trio}:
+                trio.append(c)
+            k += 1
+            if k > len(all_focus):
+                break
         slates.append({
             "date": day.isoformat(), "weekday": day.strftime("%A"),
-            "focus": [fr[(n * 3 + k) % len(fr)] for k in range(3)],
-            "background": [br[(n * 2 + k) % len(br)] for k in range(2)] if br else [],
+            "focus": trio[:3],
+            "background": [br[(n * 2 + j) % len(br)] for j in range(2)] if br else [],
         })
 
     # --- assemble ----------------------------------------------------------
