@@ -6,8 +6,7 @@ pages_build_output_dir = "dist/public"
 compatibility_date = "2026-06-28"
 
 # D1 (SQLite) for the stateful store (dismiss / shortlist / watched / notes).
-# database_id is filled in after `wrangler d1 create cineprompt-db`.
 [[d1_databases]]
 binding = "DB"
 database_name = "cineprompt-db"
-database_id = "PLACEHOLDER_SET_AFTER_D1_CREATE"
+database_id = "e7360a9c-b004-480a-bf83-185786081e75"
