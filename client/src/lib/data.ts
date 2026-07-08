@@ -85,6 +85,29 @@ export interface CanonFilm {
 // canon: { best_picture: CanonFilm[], sight_and_sound_2022: [...], afi_100: [...], criterion: [...] }
 export type Canon = Record<string, CanonFilm[]>;
 
+export interface CollectionFilm {
+  title: string;
+  year: number;
+  tmdb_id: number | null;
+  imdb_id?: string | null;
+  poster?: string | null;
+  overview?: string | null;
+  seen: boolean;
+}
+export interface CollectionMeta {
+  key: string;
+  name: string;
+  description: string;
+  mdblist_id: number;
+  slug: string;
+  private: boolean;
+  media_type: string;
+  total: number;
+  seen: number;
+  unseen: number;
+}
+export type Collections = Record<string, CollectionFilm[]>;
+
 export interface CraftFilm {
   tmdb_id: number;
   title: string;
@@ -285,6 +308,8 @@ export interface AppData {
   version?: string;
   canon?: Canon;
   canon_meta?: { key: string; name: string }[];
+  collections?: Collections;
+  collections_meta?: CollectionMeta[];
   review_quotes?: Record<string, ReviewQuote>;
   director_quotes?: Record<string, ReviewQuote[]>;
   craft_dimensions?: CraftDimensions;

@@ -303,7 +303,7 @@ def build(export_src, base_path, out_path):
             for v in obj:
                 mark_seen(v)
 
-    for key in ("canon", "screenplays", "themed_weeks", "directors", "director_targets", "craft_dimensions"):
+    for key in ("canon", "collections", "screenplays", "themed_weeks", "directors", "director_targets", "craft_dimensions"):
         if key in base:
             mark_seen(base[key])
 

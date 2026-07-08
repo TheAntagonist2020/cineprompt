@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""build_lists.py — rebuild Cineprompt's Canon section from Dalton's own MDBList
-lists, which carry exact TMDB ids (so seen/unseen is precise, not scraped).
+"""build_lists.py — rebuild Cineprompt's Canon + Collections sections from
+Dalton's own MDBList lists, which carry exact TMDB ids (so seen/unseen is
+precise, not scraped).
 
 Replaces the stale built-in `criterion` with the real Complete Criterion
 Collection and adds his curated lists as new checklists. Keeps the standard
 built-in canons (Best Picture / Sight & Sound / AFI), re-marking their `seen`
-flags against the current watched set. Writes `canon` + `canon_meta` (the
-ordered [{key,name}] the data-driven Canon page reads).
+flags against the current watched set. Writes `canon` + `canon_meta`, plus
+`collections` + `collections_meta` for the full MDBList library.
 
 Key: MDBLIST_API_KEY from the environment or datagen/.env.
 
@@ -48,6 +49,11 @@ MDBLIST_LISTS = [
     (157997, "surreal", "Surreal, Psychedelic & Mind-Bending"),
     (165324, "films_1970s", "1000 Films: The 1970s"),
 ]
+
+# Cineprompt-generated output should not feed back into source collections.
+# The app is movie-shaped for now, so TV/show lists are skipped here.
+SKIP_LIST_IDS = {184977}
+SKIP_MEDIA_TYPES = {"show"}
 
 
 def _key():
@@ -99,6 +105,17 @@ def fetch_list_items(list_id):
     return items
 
 
+def fetch_user_lists():
+    lists = _get("/lists/user")
+    if isinstance(lists, dict):
+        lists = lists.get("lists", [])
+    return lists or []
+
+
+def collection_key(list_info):
+    return f"mdblist_{list_info.get('id')}"
+
+
 def to_canon_films(items, watched):
     """MDBList items -> sorted CanonFilm[], deduped by tmdb id."""
     out, seen_ids = [], set()
@@ -117,6 +134,30 @@ def to_canon_films(items, watched):
             "seen": tid in watched if tid is not None else False,
         })
     # chronological, undated last; stable by title
+    out.sort(key=lambda f: (f["year"] if f["year"] else 9999, (f["title"] or "").lower()))
+    return out
+
+
+def to_collection_films(items, watched):
+    """MDBList items -> sorted collection films, deduped by TMDB id."""
+    out, seen_ids = [], set()
+    for m in items:
+        tid = (m.get("ids") or {}).get("tmdb") or m.get("id")
+        tid = int(tid) if tid else None
+        if tid is not None and tid in seen_ids:
+            continue
+        if tid is not None:
+            seen_ids.add(tid)
+        yr = m.get("release_year")
+        out.append({
+            "title": m.get("title"),
+            "year": int(yr) if (yr and str(yr).isdigit()) else 0,
+            "tmdb_id": tid,
+            "imdb_id": (m.get("ids") or {}).get("imdb"),
+            "poster": m.get("poster"),
+            "overview": m.get("overview"),
+            "seen": tid in watched if tid is not None else False,
+        })
     out.sort(key=lambda f: (f["year"] if f["year"] else 9999, (f["title"] or "").lower()))
     return out
 
@@ -155,9 +196,44 @@ def build(data_path):
 
     d["canon"] = canon
     d["canon_meta"] = meta
+
+    collections, collections_meta = {}, []
+    for l in fetch_user_lists():
+        list_id = int(l.get("id") or 0)
+        media_type = (l.get("mediatype") or "").lower()
+        if not list_id or list_id in SKIP_LIST_IDS or media_type in SKIP_MEDIA_TYPES:
+            continue
+
+        name = l.get("name") or f"MDBList {list_id}"
+        films = to_collection_films(fetch_list_items(list_id), watched)
+        if not films:
+            print(f"  ! collection {name}: 0 items, skipped")
+            continue
+
+        seen = sum(1 for f in films if f["seen"])
+        key = collection_key(l)
+        collections[key] = films
+        collections_meta.append({
+            "key": key,
+            "name": name,
+            "description": l.get("description") or "",
+            "mdblist_id": list_id,
+            "slug": l.get("slug") or "",
+            "private": bool(l.get("private")),
+            "media_type": l.get("mediatype") or "movie",
+            "total": len(films),
+            "seen": seen,
+            "unseen": len(films) - seen,
+        })
+        print(f"  collection {name}: {len(films)} films, {seen} seen ({100*seen/len(films):.1f}%)")
+
+    collections_meta.sort(key=lambda m: (m["name"] or "").lower())
+    d["collections"] = collections
+    d["collections_meta"] = collections_meta
     json.dump(d, open(data_path, "w", encoding="utf-8"), ensure_ascii=False)
     print(f"\nWrote {data_path}")
     print(f"  canon categories: {len(meta)} -> {[m['key'] for m in meta]}")
+    print(f"  collections: {len(collections_meta)} -> {[m['name'] for m in collections_meta]}")
 
 
 if __name__ == "__main__":

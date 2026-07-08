@@ -101,6 +101,7 @@ PULP_GENRES = {"Horror", "Thriller", "Action", "Crime", "Science Fiction",
 PULP_GENRE_IDS = {"Horror": 27, "Thriller": 53, "Crime": 80,
                   "Science Fiction": 878, "Action": 28}
 CANON_CAND_CAP = 300   # max candidates pulled from any single canon list (cost bound)
+COLLECTION_CAND_CAP = 220  # max candidates pulled from any single personal list
 # Target tonal mix for the focus pool — intersperse the pulp, don't bury it.
 REGISTER_TARGET = {"pulp": 0.40, "middle": 0.30, "heavy": 0.30}
 
@@ -225,9 +226,9 @@ def enrich(tmdb, prof):
 
 # ---------------------------------------------------------------- candidates
 def gather_candidates(tmdb, base, prof, enr):
-    """Return {tmdb_id: {"sources": set(), "canon": set()}} of UNSEEN candidates."""
+    """Return {tmdb_id: {"sources": set(), "canon": set(), "collections": set()}}."""
     watched = prof["watched_ids"]
-    cand = defaultdict(lambda: {"sources": set(), "canon": set()})
+    cand = defaultdict(lambda: {"sources": set(), "canon": set(), "collections": set()})
 
     # 1) canon lists already in the data — unseen entries are prime challenges.
     #    Includes your curated MDBList lists (genre/pulp), capped per list.
@@ -240,6 +241,19 @@ def gather_candidates(tmdb, base, prof, enr):
                 cand[tid]["canon"].add(list_key)
                 n += 1
                 if n >= CANON_CAND_CAP:
+                    break
+
+    # 1b) the broader MDBList library. These are personal terrain, but capped
+    # per list so huge archive lists do not overwhelm the curated canon signal.
+    for list_key, films in (base.get("collections") or {}).items():
+        n = 0
+        for f in films:
+            tid = f.get("tmdb_id")
+            if tid and tid not in watched:
+                cand[tid]["sources"].add("collection")
+                cand[tid]["collections"].add(list_key)
+                n += 1
+                if n >= COLLECTION_CAND_CAP:
                     break
 
     # 2) unseen filmographies of directors you rate highly
@@ -343,6 +357,19 @@ def score_candidate(m, info, enr):
         k = canon_keys[0]
         score += CANON_BONUS.get(k, 10)
         reasons.append(f"on the {CANON_LABEL.get(k, k)} list")
+
+    # broader personal-list membership. This is a nudge, not a canon hammer:
+    # it lets genre/action/horror/watch-now lists participate in the slate.
+    collection_keys = sorted(info.get("collections", []))
+    if collection_keys:
+        meta_by_key = enr.get("collection_meta", {})
+        best = max(
+            collection_keys,
+            key=lambda k: meta_by_key.get(k, {}).get("unseen", 0),
+        )
+        name = meta_by_key.get(best, {}).get("name", best)
+        score += 7
+        reasons.append(f"on your {name} list")
 
     # decade blindspot
     yr = m.get("year")
@@ -465,6 +492,7 @@ def build(base_path, out_path):
         )
 
     enr = enrich(tmdb, prof)
+    enr["collection_meta"] = {m["key"]: m for m in (base.get("collections_meta") or [])}
 
     cand = gather_candidates(tmdb, base, prof, enr)
 
@@ -676,7 +704,7 @@ def build(base_path, out_path):
         elif isinstance(o, list):
             for v in o:
                 mark_seen(v)
-    for k in ("canon", "screenplays", "themed_weeks", "craft_dimensions", "directors"):
+    for k in ("canon", "collections", "screenplays", "themed_weeks", "craft_dimensions", "directors"):
         if k in base:
             mark_seen(base[k])
 

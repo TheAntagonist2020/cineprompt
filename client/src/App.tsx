@@ -12,6 +12,7 @@ import Week from "@/pages/week";
 import Background from "@/pages/background";
 import Queue from "@/pages/queue";
 import Shortlist from "@/pages/shortlist";
+import Collections from "@/pages/collections";
 import BlindSpots from "@/pages/blindspots";
 import Directors from "@/pages/directors";
 import DirectorDetail from "@/pages/director-detail";
@@ -40,6 +41,7 @@ function AppRouter() {
           <Route path="/background" component={Background} />
           <Route path="/queue" component={Queue} />
           <Route path="/shortlist" component={Shortlist} />
+          <Route path="/collections" component={Collections} />
           <Route path="/blindspots" component={BlindSpots} />
           <Route path="/directors" component={Directors} />
           <Route path="/directors/:name" component={DirectorDetail} />

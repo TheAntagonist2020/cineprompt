@@ -243,7 +243,7 @@ def main(base_path, out_path, enrich=False):
         elif isinstance(o, list):
             for v in o:
                 mark_seen(v)
-    for k in ("canon", "screenplays", "themed_weeks", "directors", "director_targets", "craft_dimensions"):
+    for k in ("canon", "collections", "screenplays", "themed_weeks", "directors", "director_targets", "craft_dimensions"):
         if k in base:
             mark_seen(base[k])
 
