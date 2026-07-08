@@ -102,6 +102,14 @@ PULP_GENRE_IDS = {"Horror": 27, "Thriller": 53, "Crime": 80,
                   "Science Fiction": 878, "Action": 28}
 CANON_CAND_CAP = 300   # max candidates pulled from any single canon list (cost bound)
 COLLECTION_CAND_CAP = 220  # max candidates pulled from any single personal list
+LANE_BONUS_FALLBACK = {
+    "streaming_now": 12,
+    "pulp": 10,
+    "deep_weird": 9,
+    "comfort": 8,
+    "canon": 8,
+    "assignment": 6,
+}
 # Target tonal mix for the focus pool — intersperse the pulp, don't bury it.
 REGISTER_TARGET = {"pulp": 0.40, "middle": 0.30, "heavy": 0.30}
 
@@ -365,11 +373,18 @@ def score_candidate(m, info, enr):
         meta_by_key = enr.get("collection_meta", {})
         best = max(
             collection_keys,
-            key=lambda k: meta_by_key.get(k, {}).get("unseen", 0),
+            key=lambda k: (
+                meta_by_key.get(k, {}).get("lane_weight", 0),
+                meta_by_key.get(k, {}).get("unseen", 0),
+            ),
         )
-        name = meta_by_key.get(best, {}).get("name", best)
-        score += 7
-        reasons.append(f"on your {name} list")
+        meta = meta_by_key.get(best, {})
+        name = meta.get("name", best)
+        lane = meta.get("lane")
+        lane_label = meta.get("lane_label") or "personal"
+        lane_bonus = meta.get("lane_weight") or LANE_BONUS_FALLBACK.get(lane, 7)
+        score += lane_bonus
+        reasons.append(f"on your {lane_label} lane via {name}")
 
     # decade blindspot
     yr = m.get("year")

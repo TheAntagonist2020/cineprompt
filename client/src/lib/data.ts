@@ -105,6 +105,11 @@ export interface CollectionMeta {
   total: number;
   seen: number;
   unseen: number;
+  lane: string;
+  lane_label: string;
+  lane_description: string;
+  lane_weight: number;
+  lane_order: number;
 }
 export type Collections = Record<string, CollectionFilm[]>;
 

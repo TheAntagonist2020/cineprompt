@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
-import { Check, ExternalLink, Search } from "lucide-react";
+import { Check, ExternalLink, Filter, Search, Shuffle } from "lucide-react";
 import {
   formatNumber,
   letterboxdTmdbUrl,
@@ -20,19 +20,61 @@ function mdblistUrl(meta: CollectionMeta): string {
   return `https://mdblist.com/lists/${meta.mdblist_id}`;
 }
 
+type ShufflePick = {
+  film: CollectionFilm;
+  meta: CollectionMeta;
+};
+
 export default function Collections() {
   const { data, loading } = useAppData();
   const [query, setQuery] = useState("");
+  const [lane, setLane] = useState<string>("all");
   const [open, setOpen] = useState<string | null>(null);
+  const [pick, setPick] = useState<ShufflePick | null>(null);
+
+  const laneOptions = useMemo(() => {
+    const meta = data?.collections_meta ?? [];
+    const seen = new Map<string, CollectionMeta>();
+    for (const m of meta) {
+      if (!seen.has(m.lane)) seen.set(m.lane, m);
+    }
+    return Array.from(seen.values()).sort(
+      (a, b) => a.lane_order - b.lane_order || a.lane_label.localeCompare(b.lane_label)
+    );
+  }, [data]);
 
   const lists = useMemo(() => {
     const meta = data?.collections_meta ?? [];
     const q = query.trim().toLowerCase();
-    if (!q) return meta;
-    return meta.filter((m) =>
-      `${m.name} ${m.description} ${m.slug}`.toLowerCase().includes(q)
-    );
-  }, [data, query]);
+    return meta
+      .filter((m) => lane === "all" || m.lane === lane)
+      .filter((m) => {
+        if (!q) return true;
+        return `${m.name} ${m.description} ${m.slug} ${m.lane_label}`
+          .toLowerCase()
+          .includes(q);
+      })
+      .sort((a, b) => a.lane_order - b.lane_order || a.name.localeCompare(b.name));
+  }, [data, query, lane]);
+
+  const shufflePool = useMemo(() => {
+    const collections = data?.collections ?? {};
+    const byFilm = new Map<string, ShufflePick>();
+    for (const meta of lists) {
+      for (const film of collections[meta.key] ?? []) {
+        if (film.seen) continue;
+        const key = film.tmdb_id ? `tmdb:${film.tmdb_id}` : `title:${film.title}:${film.year}`;
+        if (!byFilm.has(key)) byFilm.set(key, { film, meta });
+      }
+    }
+    return Array.from(byFilm.values());
+  }, [data, lists]);
+
+  function drawRandom() {
+    if (!shufflePool.length) return;
+    setOpen(null);
+    setPick(shufflePool[Math.floor(Math.random() * shufflePool.length)]);
+  }
 
   if (loading || !data) return <LoadingScreen />;
 
@@ -40,6 +82,7 @@ export default function Collections() {
   const totalLists = data.collections_meta?.length ?? 0;
   const totalTitles = data.collections_meta?.reduce((sum, m) => sum + m.total, 0) ?? 0;
   const totalUnseen = data.collections_meta?.reduce((sum, m) => sum + m.unseen, 0) ?? 0;
+  const totalLanes = laneOptions.length;
 
   return (
     <PageShell
@@ -47,21 +90,64 @@ export default function Collections() {
       title="Collections"
       intro="Your compiled list library, preserved as exact TMDB-linked watch terrain."
     >
-      <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
         <Metric label="Lists" value={formatNumber(totalLists)} />
         <Metric label="Titles" value={formatNumber(totalTitles)} />
         <Metric label="Unseen" value={formatNumber(totalUnseen)} />
+        <Metric label="Lanes" value={formatNumber(totalLanes)} />
       </div>
 
-      <label className="relative block mb-6">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search collections"
-          className="h-11 w-full rounded-sm border border-border bg-card/30 pl-10 pr-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60"
-        />
-      </label>
+      <div className="mb-6 grid gap-3">
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          <LaneButton
+            label="All"
+            active={lane === "all"}
+            onClick={() => {
+              setLane("all");
+              setOpen(null);
+              setPick(null);
+            }}
+          />
+          {laneOptions.map((option) => (
+            <LaneButton
+              key={option.lane}
+              label={option.lane_label}
+              active={lane === option.lane}
+              onClick={() => {
+                setLane(option.lane);
+                setOpen(null);
+                setPick(null);
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <label className="relative block">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPick(null);
+              }}
+              placeholder="Search collections"
+              className="h-11 w-full rounded-sm border border-border bg-card/30 pl-10 pr-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/60"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={drawRandom}
+            disabled={!shufflePool.length}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-sm border border-primary/35 bg-primary/10 px-4 font-mono text-[11px] uppercase tracking-[0.16em] text-primary transition-colors hover:border-primary/60 hover:bg-primary/15 disabled:border-border disabled:bg-card/20 disabled:text-muted-foreground"
+          >
+            <Shuffle className="h-4 w-4" />
+            Shuffle unseen
+          </button>
+        </div>
+      </div>
+
+      {pick && <ShufflePickCard pick={pick} onShuffle={drawRandom} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
         {lists.map((meta) => {
@@ -78,6 +164,10 @@ export default function Collections() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
+                    <span className="mb-3 inline-flex items-center gap-1 rounded-sm border border-primary/30 bg-primary/10 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-primary/80">
+                      <Filter className="h-3 w-3" />
+                      {meta.lane_label}
+                    </span>
                     <h2 className="font-serif text-2xl leading-tight text-foreground">
                       {meta.name}
                     </h2>
@@ -120,6 +210,96 @@ export default function Collections() {
         })}
       </div>
     </PageShell>
+  );
+}
+
+function ShufflePickCard({
+  pick,
+  onShuffle,
+}: {
+  pick: ShufflePick;
+  onShuffle: () => void;
+}) {
+  const href = pick.film.tmdb_id ? tmdbUrl(pick.film.tmdb_id, pick.film.title) : tmdbUrl(null, pick.film.title);
+  return (
+    <div className="mb-6 grid gap-4 rounded-md border border-primary/40 bg-primary/10 p-4 sm:grid-cols-[96px_1fr_auto]">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block aspect-[2/3] w-24 overflow-hidden rounded-sm border border-primary/20 bg-muted"
+      >
+        {posterUrl(pick.film.poster, "w342") ? (
+          <img
+            src={posterUrl(pick.film.poster, "w342") ?? ""}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center px-2 text-center font-serif text-sm text-muted-foreground">
+            {pick.film.title}
+          </div>
+        )}
+      </a>
+      <div className="min-w-0">
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-sm border border-primary/30 bg-background/40 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-primary/80">
+            {pick.meta.lane_label}
+          </span>
+          <span className="rounded-sm border border-border bg-background/30 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            {pick.meta.name}
+          </span>
+        </div>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 block font-serif text-3xl leading-tight text-foreground hover:text-primary"
+        >
+          {pick.film.title}
+        </a>
+        <p className="mt-2 font-mono text-xs uppercase tracking-[0.14em] text-muted-foreground">
+          {pick.film.year || "Undated"} / Unseen
+        </p>
+        {pick.film.overview && (
+          <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+            {pick.film.overview}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onShuffle}
+        className="inline-flex h-10 items-center justify-center gap-2 rounded-sm border border-primary/35 px-3 font-mono text-[11px] uppercase tracking-[0.16em] text-primary/85 transition-colors hover:border-primary/60 hover:text-primary sm:self-start"
+      >
+        <Shuffle className="h-4 w-4" />
+        Again
+      </button>
+    </div>
+  );
+}
+
+function LaneButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`shrink-0 rounded-sm border px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors ${
+        active
+          ? "border-primary/60 bg-primary/15 text-primary"
+          : "border-border bg-card/25 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

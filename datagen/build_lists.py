@@ -55,6 +55,45 @@ MDBLIST_LISTS = [
 SKIP_LIST_IDS = {184977}
 SKIP_MEDIA_TYPES = {"show"}
 
+LANE_PROFILES = {
+    "streaming_now": {
+        "label": "Streaming Now",
+        "description": "available and time-sensitive",
+        "weight": 12,
+        "order": 0,
+    },
+    "pulp": {
+        "label": "Pulp",
+        "description": "genre fuel, crime, horror, action, sci-fi",
+        "weight": 10,
+        "order": 1,
+    },
+    "comfort": {
+        "label": "Comfort",
+        "description": "familiar, re-entry, low-friction watches",
+        "weight": 8,
+        "order": 2,
+    },
+    "deep_weird": {
+        "label": "Deep Weird",
+        "description": "surreal, psychedelic, formally strange",
+        "weight": 9,
+        "order": 3,
+    },
+    "canon": {
+        "label": "Canon",
+        "description": "major works and durable reputation",
+        "weight": 8,
+        "order": 4,
+    },
+    "assignment": {
+        "label": "Assignment",
+        "description": "criticism homework made navigable",
+        "weight": 6,
+        "order": 5,
+    },
+}
+
 
 def _key():
     k = os.environ.get("MDBLIST_API_KEY")
@@ -114,6 +153,37 @@ def fetch_user_lists():
 
 def collection_key(list_info):
     return f"mdblist_{list_info.get('id')}"
+
+
+def classify_collection(list_info):
+    """Assign a critic-use lane to a personal MDBList list."""
+    text = " ".join([
+        list_info.get("name") or "",
+        list_info.get("slug") or "",
+        list_info.get("description") or "",
+    ]).lower()
+
+    if "streaming" in text:
+        lane = "streaming_now"
+    elif any(t in text for t in ("horror", "action", "sci", "fantasy", "r-rated", "crime", "thriller")):
+        lane = "pulp"
+    elif any(t in text for t in ("surreal", "psychedelic", "mind-bending")):
+        lane = "deep_weird"
+    elif any(t in text for t in ("criterion", "mubi", "digitized", "1950s", "1960s", "1970s", "1980s", "21st century")):
+        lane = "assignment"
+    elif any(t in text for t in ("nostalgia", "80s", "90s")):
+        lane = "comfort"
+    else:
+        lane = "canon"
+
+    profile = LANE_PROFILES[lane]
+    return {
+        "lane": lane,
+        "lane_label": profile["label"],
+        "lane_description": profile["description"],
+        "lane_weight": profile["weight"],
+        "lane_order": profile["order"],
+    }
 
 
 def to_canon_films(items, watched):
@@ -212,6 +282,7 @@ def build(data_path):
 
         seen = sum(1 for f in films if f["seen"])
         key = collection_key(l)
+        lane = classify_collection(l)
         collections[key] = films
         collections_meta.append({
             "key": key,
@@ -224,6 +295,7 @@ def build(data_path):
             "total": len(films),
             "seen": seen,
             "unseen": len(films) - seen,
+            **lane,
         })
         print(f"  collection {name}: {len(films)} films, {seen} seen ({100*seen/len(films):.1f}%)")
 
