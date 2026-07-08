@@ -95,9 +95,16 @@ export function Layout({ children }: { children: ReactNode }) {
   const moreActive = mobileMore.some((n) => n.match(loc));
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="relative min-h-screen overflow-x-hidden bg-background text-foreground">
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <div className="cinema-ambient-orb-a" />
+        <div className="cinema-ambient-orb-b" />
+        <div className="cinema-grid-overlay" />
+        <div className="cinema-vignette" />
+      </div>
+
       {/* Sidebar (desktop) */}
-      <aside className="hidden md:flex fixed inset-y-0 left-0 w-60 flex-col border-r border-sidebar-border bg-sidebar z-30">
+      <aside className="hidden md:flex fixed inset-y-0 left-0 w-60 flex-col border-r border-sidebar-border bg-sidebar/92 backdrop-blur z-30">
         <Link href="/" data-testid="link-logo">
           <div className="px-6 pt-7 pb-6 cursor-pointer">
             <div className="flex items-center gap-2.5 text-primary">
@@ -107,7 +114,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </span>
             </div>
             <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mt-2 ml-0.5">
-              for Dalton @ Lunara Film
+              LUNARA Film cockpit
             </p>
           </div>
         </Link>
@@ -161,7 +168,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </header>
 
       {/* Main */}
-      <main className="md:pl-60 pb-24 md:pb-0 min-h-screen">{children}</main>
+      <main className="relative z-10 md:pl-60 pb-24 md:pb-0 min-h-screen">{children}</main>
 
       {/* Mobile bottom tab bar: 4 primary + More */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-5 border-t border-border bg-background/95 backdrop-blur">
