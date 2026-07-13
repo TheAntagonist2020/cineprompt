@@ -6,6 +6,12 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Posters/backdrops all come from TMDB's CDN; warm the connection early. -->
+    <link rel="preconnect" href="https://image.tmdb.org" crossorigin />
+    <!-- Start the data.json download during HTML parse, in parallel with the JS.
+         crossorigin matches fetch()'s default credentials mode so the preload
+         is reused instead of downloaded twice. -->
+    <link rel="preload" href="./data.json" as="fetch" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..700&family=Inter:wght@300..700&family=JetBrains+Mono:wght@400..600&family=Playfair+Display:ital,wght@0,400..900;1,400..700&display=swap"
       rel="stylesheet"

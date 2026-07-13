@@ -16,6 +16,25 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Stable vendor chunks: app-code edits don't invalidate the big
+        // framework chunks in the browser/CDN cache, and the chart stack
+        // only downloads on pages that draw charts.
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return;
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) {
+            return "react-vendor";
+          }
+          if (id.includes("node_modules/framer-motion/")) return "motion";
+          if (
+            /node_modules\/(recharts|victory-vendor|d3-|react-smooth|recharts-scale)/.test(id)
+          ) {
+            return "charts";
+          }
+        },
+      },
+    },
   },
   server: {
     fs: {

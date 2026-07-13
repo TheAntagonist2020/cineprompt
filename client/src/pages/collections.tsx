@@ -356,7 +356,7 @@ function CollectionGrid({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className={`group rounded-sm border bg-card/20 transition-colors ${
+              className={`cv-card group rounded-sm border bg-card/20 transition-colors ${
                 film.seen
                   ? "border-primary/30 hover:border-primary/60"
                   : "border-border/60 hover:border-primary/40"

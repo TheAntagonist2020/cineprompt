@@ -321,6 +321,10 @@
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   .text-balance { text-wrap: balance; }
   .film-shadow { box-shadow: 0 18px 40px -12px rgba(0,0,0,0.7); }
+  /* Skip layout/paint for off-screen cards in long grids (collections can
+     render 600+ poster cards). The intrinsic size approximates a card so
+     scrollbar geometry stays sane before cards are first rendered. */
+  .cv-card { content-visibility: auto; contain-intrinsic-size: auto 320px; }
 }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: hsl(240 6% 6%); }
