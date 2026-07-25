@@ -12,7 +12,7 @@ The app is a **static single-page app**: all content is precomputed by a Python 
 
 ## Prerequisites
 
-- Node.js 18+ (developed on Node 24)
+- Node.js 20.19+ or 22.12+ (developed on Node 22; see `.node-version`)
 - Python 3.10+ (only needed to regenerate data)
 
 ## Run it
