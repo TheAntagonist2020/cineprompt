@@ -138,6 +138,29 @@ datagen/         Python data pipeline (TMDB / Trakt / Letterboxd)
 shared/          shared types
 ```
 
+## Why Criterion Channel watches must be logged by hand
+
+Criterion is a large share of the viewing here (400+ diary entries) and it is the
+one service that **cannot** be tracked automatically. This was investigated
+properly in July 2026 so it doesn't need re-litigating:
+
+- **No Trakt integration.** Trakt's own Streaming Scrobbler covers Netflix,
+  Apple TV+, Disney+, Prime Video, Hulu, Max and Paramount+ only. The
+  Universal Trakt Scrobbler extension supports 28 services, none of them
+  Criterion; [the request](https://github.com/trakt-tools/universal-trakt-scrobbler/issues/339)
+  has been open since 2023.
+- **No customer API.** The Channel runs on Vimeo OTT (VHX), whose API is
+  scoped to the *site owner's* key — Criterion's, not yours.
+- **No readable playback metadata.** Viewing happens on an NVIDIA Shield, so
+  browser-extension scrobblers are irrelevant. The Android app publishes only
+  `"The Criterion Channel"` to Android's MediaSession — never the film title —
+  so nothing on the device can tell *which* film played. Verified on the Shield
+  (Android 11, Criterion app v10.303.1).
+
+So: log Criterion watches to Letterboxd as usual. `letterboxd_rss.py` then pulls
+them in automatically on every scheduled run and every "Sync now" — that path
+exists precisely because this one doesn't.
+
 ## Notes
 
 - Routing is hash-based (`/#/queue`), so the app works from any static host or `file://` without server rewrites.
