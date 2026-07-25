@@ -72,6 +72,18 @@ jobs:
           TRAKT_USER: ${{ secrets.TRAKT_USER }}
         run: python datagen/rebuild.py
 
+      # Fold in your recent Letterboxd diary (public RSS — no API key). This is
+      # how watches from services with no scrobbler (Criterion Channel above
+      # all) reach the site: you log them on Letterboxd, they land here.
+      # Non-fatal so a Letterboxd hiccup never blocks the deploy.
+      - name: Sync recent Letterboxd diary (RSS)
+        if: github.event_name != 'push'
+        continue-on-error: true
+        env:
+          LETTERBOXD_USER: ${{ secrets.LETTERBOXD_USER }}
+          PYTHONUTF8: "1"
+        run: python datagen/letterboxd_rss.py client/public/data.json client/public/data.json
+
       # Rebuild the Canon checklists from your own MDBList lists (exact TMDB ids
       # -> accurate seen/unseen). Non-fatal so a MDBList hiccup never blocks deploy.
       - name: Rebuild canon from your MDBList lists
