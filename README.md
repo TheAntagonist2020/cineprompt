@@ -1,6 +1,6 @@
 # Cineprompt
 
-A personal film dashboard for Dalton Johnson ([_DaltonDJohnson](https://letterboxd.com/_DaltonDJohnson/) · [lunarafilm.com](https://lunarafilm.com)). It turns a Letterboxd + Trakt + TMDB viewing history (4,500+ films) into a daily "what to watch" cockpit: a rotating daily slate, a scored recommendation queue, blind-spot analysis, director completion targets, canon checklists, screenplay reading lists, craft (cinematographer/composer) tracking, themed weeks, a tag explorer, and a mood-based picker.
+A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd.com/daltonjohnson/) · [lunarafilm.com](https://lunarafilm.com)). It turns a Letterboxd + Trakt + TMDB viewing history (4,500+ films) into a daily "what to watch" cockpit: a rotating daily slate, a scored recommendation queue, blind-spot analysis, director completion targets, canon checklists, screenplay reading lists, craft (cinematographer/composer) tracking, themed weeks, a tag explorer, and a mood-based picker.
 
 The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file, which the React client loads at startup. The Express server only serves the built client — there is no database or API at runtime.
 
@@ -53,6 +53,18 @@ Three levels of refresh, lightest to heaviest:
   npm run data:sync
   ```
 
+- **Fold in your recent Letterboxd diary** — reads your public RSS feed (no API
+  key, no export). This is how watches from services with no scrobbler reach the
+  site: **the Criterion Channel has no Trakt integration of any kind**, so those
+  nights only arrive if you log them on Letterboxd. Adds any films Trakt missed,
+  plus fresh ratings and review snippets:
+  ```bash
+  npm run data:letterboxd
+  ```
+  The feed carries the ~50 most recent entries and **no tags**, so full history
+  and diary tag counts (including `criterion channel`) still come from the ZIP
+  export via `build_data.py`. Safe to re-run — the merge is idempotent.
+
 - **Rebuild the recommendation engine** — the full discovery pipeline. Pulls your
   taste profile from Trakt, finds fresh **unseen** films (canon lists + loved-
   director filmographies + TMDB discovery across your under-watched decades and
@@ -94,6 +106,7 @@ sync) are still here; they refresh the *seen* side but recycle the existing pool
 | `npm run check` | TypeScript type-check (no emit) |
 | `npm run data:refresh` | Roll the daily slate window forward to today (no API) |
 | `npm run data:sync` | Sync watched set / stats / blindspots from Trakt |
+| `npm run data:letterboxd` | Fold in recent Letterboxd diary via public RSS (catches Criterion Channel & anything Trakt missed) |
 | `npm run data:rebuild` | Full recommendation rebuild (discovers fresh unseen picks) |
 | `npm run cf:deploy` | Build + deploy to Cloudflare Pages (manual; CI does this automatically) |
 
@@ -119,10 +132,34 @@ datagen/         Python data pipeline (TMDB / Trakt / Letterboxd)
   build_recommendations.py  the discovery engine (fresh unseen picks)
   rebuild.py                backup + rebuild wrapper (npm run data:rebuild)
   build_from_trakt.py       watch-history sync
+  letterboxd_rss.py         recent diary via public RSS (no API key)
   refresh_slates.py         roll the daily slate window
   tmdb.py                   TMDB client + cache
 shared/          shared types
 ```
+
+## Why Criterion Channel watches must be logged by hand
+
+Criterion is a large share of the viewing here (400+ diary entries) and it is the
+one service that **cannot** be tracked automatically. This was investigated
+properly in July 2026 so it doesn't need re-litigating:
+
+- **No Trakt integration.** Trakt's own Streaming Scrobbler covers Netflix,
+  Apple TV+, Disney+, Prime Video, Hulu, Max and Paramount+ only. The
+  Universal Trakt Scrobbler extension supports 28 services, none of them
+  Criterion; [the request](https://github.com/trakt-tools/universal-trakt-scrobbler/issues/339)
+  has been open since 2023.
+- **No customer API.** The Channel runs on Vimeo OTT (VHX), whose API is
+  scoped to the *site owner's* key — Criterion's, not yours.
+- **No readable playback metadata.** Viewing happens on an NVIDIA Shield, so
+  browser-extension scrobblers are irrelevant. The Android app publishes only
+  `"The Criterion Channel"` to Android's MediaSession — never the film title —
+  so nothing on the device can tell *which* film played. Verified on the Shield
+  (Android 11, Criterion app v10.303.1).
+
+So: log Criterion watches to Letterboxd as usual. `letterboxd_rss.py` then pulls
+them in automatically on every scheduled run and every "Sync now" — that path
+exists precisely because this one doesn't.
 
 ## Notes
 
