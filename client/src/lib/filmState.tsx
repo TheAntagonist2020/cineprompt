@@ -19,7 +19,7 @@ export interface FilmState {
   rating?: number | null;
 }
 
-interface FilmStateContextValue {
+export interface FilmStateContextValue {
   ready: boolean; // initial load done
   available: boolean; // API reachable (false in Express dev)
   get: (tmdbId: number) => FilmState | undefined;
@@ -27,6 +27,7 @@ interface FilmStateContextValue {
   isShortlisted: (tmdbId: number) => boolean;
   isWatched: (tmdbId: number) => boolean;
   shortlistIds: () => number[];
+  watchedIds: () => number[];
   snooze: (tmdbId: number) => void; // "not tonight"
   dismiss: (tmdbId: number) => void; // never show again
   toggleShortlist: (tmdbId: number) => void;
@@ -43,6 +44,7 @@ const FilmStateContext = createContext<FilmStateContextValue>({
   isShortlisted: () => false,
   isWatched: () => false,
   shortlistIds: () => [],
+  watchedIds: () => [],
   snooze: noop,
   dismiss: noop,
   toggleShortlist: noop,
@@ -127,6 +129,8 @@ export function FilmStateProvider({ children }: { children: ReactNode }) {
       isWatched: (id) => map.get(id)?.status === "watched",
       shortlistIds: () =>
         [...map.entries()].filter(([, s]) => s.status === "shortlist").map(([id]) => id),
+      watchedIds: () =>
+        [...map.entries()].filter(([, s]) => s.status === "watched").map(([id]) => id),
       snooze: (id) => patch(id, { snooze_until: tomorrowISO() }),
       dismiss: (id) => patch(id, { status: "dismissed", snooze_until: null }),
       toggleShortlist: (id) =>

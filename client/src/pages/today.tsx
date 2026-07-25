@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link } from "wouter";
 import { AnimatePresence, motion } from "framer-motion";
 import { CalendarDays, ListVideo, Compass, Users, Tv, Activity, RefreshCw } from "lucide-react";
@@ -18,6 +18,7 @@ import {
 import { LoadingScreen } from "@/components/layout";
 import { MoodStrip } from "@/components/mood-strip";
 import { useFilmState } from "@/lib/filmState";
+import { liveQueue } from "@/lib/liveScore";
 import {
   useMood,
   moodMetaByIds,
@@ -26,48 +27,7 @@ import {
   moodBackground,
   withKind,
 } from "@/lib/mood";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  Tooltip,
-  XAxis,
-} from "recharts";
-
-function Sparkline({ months }: { months: { label: string; count: number }[] }) {
-  return (
-    <ResponsiveContainer width="100%" height={64}>
-      <AreaChart data={months} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
-        <defs>
-          <linearGradient id="spark" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(38 55% 60%)" stopOpacity={0.4} />
-            <stop offset="100%" stopColor="hsl(38 55% 60%)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <Tooltip
-          cursor={{ stroke: "hsl(38 55% 60%)", strokeWidth: 1, strokeOpacity: 0.4 }}
-          contentStyle={{
-            background: "hsl(240 6% 9%)",
-            border: "1px solid hsl(240 5% 16%)",
-            borderRadius: 4,
-            fontSize: 12,
-            fontFamily: "JetBrains Mono, monospace",
-          }}
-          labelStyle={{ color: "hsl(40 8% 58%)" }}
-          formatter={(v: number) => [`${v} films`, ""]}
-        />
-        <XAxis dataKey="label" hide />
-        <Area
-          type="monotone"
-          dataKey="count"
-          stroke="hsl(38 55% 60%)"
-          strokeWidth={1.5}
-          fill="url(#spark)"
-        />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-}
+const Sparkline = lazy(() => import("@/components/sparkline"));
 
 // Tiny seeded shuffle — deterministic per seed.
 function pick<T>(arr: T[], seed: number, n: number): T[] {
@@ -143,10 +103,12 @@ export default function Today() {
     });
   focus = keep(focus);
   if (!moodActive && focus.length < 3) {
-    const pool = [...(data.queue ?? []), ...(data.focus_pool_extra ?? [])];
+    // Backfill in live order: hidden films are already dropped and shortlist /
+    // just-watched director affinity floats related picks to the front.
+    const pool = liveQueue(data, [...(data.queue ?? []), ...(data.focus_pool_extra ?? [])], fs);
     for (const f of pool) {
       if (focus.length >= 3) break;
-      if (!fs.isHidden(f.tmdb_id) && !usedIds.has(f.tmdb_id)) {
+      if (!usedIds.has(f.tmdb_id)) {
         usedIds.add(f.tmdb_id);
         focus.push(f);
       }
@@ -287,7 +249,9 @@ export default function Today() {
               <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground mb-1">
                 Last 12 months
               </p>
-              <Sparkline months={last12} />
+              <Suspense fallback={<div className="h-16" />}>
+                <Sparkline months={last12} />
+              </Suspense>
             </div>
           </div>
         </section>

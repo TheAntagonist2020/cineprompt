@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { ExternalLink, Star, StarHalf, X, Play, Repeat, Waves, Moon, Bookmark, BookmarkCheck, Check, RotateCcw } from "lucide-react";
 import { useFilmState } from "@/lib/filmState";
@@ -51,6 +51,7 @@ export function Poster({
         src={url}
         alt={alt}
         loading="lazy"
+        decoding="async"
         onLoad={() => setLoaded(true)}
         initial={{ opacity: 0 }}
         animate={{ opacity: loaded ? 1 : 0 }}
@@ -428,12 +429,29 @@ export function FilmDetailModal({
   film: QueueFilm | null;
   onClose: () => void;
 }) {
+  // Close on Escape and lock body scroll while the modal is open.
+  useEffect(() => {
+    if (!film) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [film, onClose]);
   if (!film) return null;
   const bd = backdropUrl(film.backdrop, "w1280");
   return (
     <div
       className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/80 backdrop-blur-sm overflow-y-auto p-0 sm:p-6"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={film.title}
       data-testid="film-modal"
     >
       <div

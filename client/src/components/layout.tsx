@@ -1,7 +1,9 @@
 import { Link, useLocation } from "wouter";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import {
   Clapperboard,
+  ExternalLink,
+  RefreshCw,
   CalendarDays,
   ListVideo,
   Tv,
@@ -25,6 +27,120 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useAppData } from "@/lib/data";
+import { useFilmState } from "@/lib/filmState";
+
+// ---------- Sync Now: trigger the CI rebuild+deploy from inside the app ----------
+type SyncPhase = "idle" | "starting" | "running" | "done" | "error";
+
+function SyncControl() {
+  const fs = useFilmState();
+  const [phase, setPhase] = useState<SyncPhase>("idle");
+  const [message, setMessage] = useState("");
+  const [runUrl, setRunUrl] = useState<string | null>(null);
+  const startedAt = useRef(0);
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  // No backend (Express dev / static preview) -> no sync control.
+  if (!fs.available) return null;
+
+  function poll() {
+    fetch("/api/sync")
+      .then((r) => r.json())
+      .then((run: { status?: string; conclusion?: string | null; created_at?: string; html_url?: string; error?: string }) => {
+        if (run.error) throw new Error(run.error);
+        if (run.html_url) setRunUrl(run.html_url);
+        const runStarted = run.created_at ? Date.parse(run.created_at) : 0;
+        // The dispatched run takes a few seconds to appear; until a run newer
+        // than our click shows up, we're still "starting".
+        if (runStarted < startedAt.current - 60_000 || run.status === "none") {
+          setPhase("starting");
+          timer.current = window.setTimeout(poll, 10_000);
+          return;
+        }
+        if (run.status === "completed") {
+          if (run.conclusion === "success") {
+            setPhase("done");
+            setMessage("Rebuilt — reload for fresh picks");
+          } else {
+            setPhase("error");
+            setMessage(`Run finished: ${run.conclusion ?? "unknown"}`);
+          }
+          return;
+        }
+        setPhase("running");
+        setMessage("Rebuilding picks…");
+        timer.current = window.setTimeout(poll, 30_000);
+      })
+      .catch((e: Error) => {
+        setPhase("error");
+        setMessage(e.message || "Sync status unavailable");
+      });
+  }
+
+  function start() {
+    if (phase === "starting" || phase === "running") return;
+    setPhase("starting");
+    setMessage("Starting sync…");
+    setRunUrl(null);
+    startedAt.current = Date.now();
+    fetch("/api/sync", { method: "POST" })
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error || `Sync failed (${r.status})`);
+        }
+        timer.current = window.setTimeout(poll, 8_000);
+      })
+      .catch((e: Error) => {
+        setPhase("error");
+        setMessage(e.message);
+      });
+  }
+
+  const busy = phase === "starting" || phase === "running";
+  return (
+    <div data-testid="sync-control">
+      <button
+        onClick={start}
+        disabled={busy}
+        data-testid="button-sync-now"
+        className="inline-flex items-center gap-2 border border-border bg-card/60 rounded-sm px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/85 hover:border-primary/50 hover:text-primary transition-colors disabled:opacity-70 disabled:hover:border-border disabled:hover:text-foreground/85"
+      >
+        <RefreshCw className={`h-3 w-3 ${busy ? "animate-spin" : ""}`} />
+        {busy ? "Syncing…" : phase === "done" ? "Sync again" : "Sync now"}
+      </button>
+      {message && (
+        <p
+          className={`mt-1.5 font-mono text-[9.5px] leading-snug ${
+            phase === "error" ? "text-destructive" : "text-muted-foreground/80"
+          }`}
+          data-testid="sync-status"
+        >
+          {message}
+          {runUrl && (
+            <>
+              {" "}
+              <a
+                href={runUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 text-primary/80 hover:text-primary"
+              >
+                run <ExternalLink className="h-2 w-2" />
+              </a>
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
 
 interface NavItem {
   href: string;
@@ -112,7 +228,9 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </Link>
 
-        <nav className="flex-1 px-3 mt-2 space-y-0.5">
+        {/* min-h-0 + overflow lets the nav scroll on short viewports instead of
+            pushing the footer (sync control) out of the fixed sidebar */}
+        <nav className="flex-1 min-h-0 overflow-y-auto px-3 mt-2 space-y-0.5">
           {NAV.map((item) => {
             const active = item.match(loc);
             const Icon = item.icon;
@@ -134,7 +252,7 @@ export function Layout({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="px-6 py-5 border-t border-sidebar-border">
+        <div className="px-6 py-5 border-t border-sidebar-border space-y-3">
           <p className="font-mono text-[10px] leading-relaxed text-muted-foreground/70">
             Trakt + Letterboxd + TMDB
             {updated && (
@@ -144,6 +262,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </>
             )}
           </p>
+          <SyncControl />
         </div>
       </aside>
 
@@ -201,7 +320,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <SheetHeader className="text-left">
               <SheetTitle className="font-serif text-2xl text-foreground">More</SheetTitle>
             </SheetHeader>
-            <div className="mt-4 grid grid-cols-2 gap-2 pb-4">
+            <div className="mt-4 grid grid-cols-2 gap-2">
               {mobileMore.map((item) => {
                 const active = item.match(loc);
                 const Icon = item.icon;
@@ -220,6 +339,9 @@ export function Layout({ children }: { children: ReactNode }) {
                   </Link>
                 );
               })}
+            </div>
+            <div className="mt-2 pb-4 pt-3 border-t border-sidebar-border">
+              <SyncControl />
             </div>
           </SheetContent>
         </Sheet>
