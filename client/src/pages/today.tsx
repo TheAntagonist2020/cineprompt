@@ -18,6 +18,7 @@ import {
 import { LoadingScreen } from "@/components/layout";
 import { MoodStrip } from "@/components/mood-strip";
 import { useFilmState } from "@/lib/filmState";
+import { liveQueue } from "@/lib/liveScore";
 import {
   useMood,
   moodMetaByIds,
@@ -102,10 +103,12 @@ export default function Today() {
     });
   focus = keep(focus);
   if (!moodActive && focus.length < 3) {
-    const pool = [...(data.queue ?? []), ...(data.focus_pool_extra ?? [])];
+    // Backfill in live order: hidden films are already dropped and shortlist /
+    // just-watched director affinity floats related picks to the front.
+    const pool = liveQueue(data, [...(data.queue ?? []), ...(data.focus_pool_extra ?? [])], fs);
     for (const f of pool) {
       if (focus.length >= 3) break;
-      if (!fs.isHidden(f.tmdb_id) && !usedIds.has(f.tmdb_id)) {
+      if (!usedIds.has(f.tmdb_id)) {
         usedIds.add(f.tmdb_id);
         focus.push(f);
       }

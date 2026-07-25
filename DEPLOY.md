@@ -90,6 +90,23 @@ you (no password to manage).
 > Gotcha: an email that doesn't match the policy fails *silently* (it just never
 > receives a code), so make sure the policy address matches exactly.
 
+## Enable the in-app "Sync now" button
+
+The sidebar's **Sync now** button triggers the same `Update & Deploy Cineprompt`
+workflow on demand from inside the app (via `/api/sync`, gated by Cloudflare
+Access like the rest of the API). It needs one secret on the **Pages project**
+(not a GitHub Actions secret):
+
+1. GitHub → **Settings → Developer settings → Fine-grained personal access
+   tokens → Generate new token.** Repository access: **only this repo**.
+   Permissions: **Actions → Read and write**. Copy the token.
+2. Cloudflare dashboard → **Workers & Pages → cineprompt → Settings →
+   Variables and secrets → Add** → type **Secret**, name `GITHUB_TOKEN`,
+   paste the token. Save, then redeploy (next CI run or `npm run cf:deploy`).
+
+Without the secret the button still renders but reports a clear
+"GITHUB_TOKEN is not configured" error when clicked.
+
 ## Custom domain (optional)
 
 To use e.g. `cine.lunarafilm.com`: Pages project → **Custom domains → Set up a

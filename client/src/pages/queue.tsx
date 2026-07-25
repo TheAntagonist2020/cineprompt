@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
-import { useAppData, formatRuntime, languageName, type QueueFilm } from "@/lib/data";
+import { useAppData, formatRuntime, languageName } from "@/lib/data";
+import { useFilmState } from "@/lib/filmState";
+import { liveQueue, type LiveFilm } from "@/lib/liveScore";
 import {
   Poster,
   RatingBar,
   Rationale,
   ActionButtons,
+  FilmActions,
   FilmDetailModal,
   useFilmModal,
   ReviewCallout,
@@ -24,6 +27,7 @@ function decadeOf(year: string): string {
 export default function Queue() {
   const { data, loading } = useAppData();
   const modal = useFilmModal();
+  const fs = useFilmState();
   const { activeMoods } = useMood();
   const [decade, setDecade] = useState("all");
   const [lang, setLang] = useState("all");
@@ -34,11 +38,14 @@ export default function Queue() {
   const moodActive = moods.length > 0;
   const moodLabel = moods.map((m) => m.label).join(" + ");
   const moodKey = activeMoods.join("-") || "all";
-  // Source list: mood picks when moods are active, else the standard queue.
+  // Source list: mood picks when moods are active, else the standard queue —
+  // then re-ranked live: watched/dismissed films drop out, and shortlist /
+  // just-watched director affinity nudges related picks up.
   const source = useMemo(() => {
     if (!data) return [];
-    return moodActive ? moodPicks(data, activeMoods) : data.queue;
-  }, [data, moodActive, activeMoods]);
+    const base = moodActive ? moodPicks(data, activeMoods) : data.queue;
+    return liveQueue(data, base, fs);
+  }, [data, moodActive, activeMoods, fs]);
 
   const decades = useMemo(() => {
     return Array.from(new Set(source.map((f) => decadeOf(f.year)))).sort();
@@ -60,7 +67,7 @@ export default function Queue() {
   return (
     <>
       <PageShell
-        eyebrow={moodActive ? `${source.length} ${moodLabel.toUpperCase()} picks` : "50 films selected for you"}
+        eyebrow={moodActive ? `${source.length} ${moodLabel.toUpperCase()} picks` : `${source.length} films selected for you`}
         title="The Queue"
         intro="A curated watchlist tuned to your gaps and the directors you love. Each pick comes with its reasoning."
       >
@@ -157,11 +164,12 @@ function QueueRow({
   onToggle,
   onOpen,
 }: {
-  film: QueueFilm;
+  film: LiveFilm;
   expanded: boolean;
   onToggle: () => void;
   onOpen: () => void;
 }) {
+  const boosted = film.live_score !== film.score;
   return (
     <article className="py-6 group" data-testid={`queue-row-${film.tmdb_id}`}>
       <div className="flex gap-5 sm:gap-7">
@@ -190,14 +198,23 @@ function QueueRow({
                 {film.genres?.length ? ` · ${film.genres.join(", ")}` : ""}
               </p>
             </div>
-            <span className="ml-auto shrink-0 font-mono text-[11px] text-primary/80 border border-primary/30 rounded-sm px-2 py-1">
-              {film.score}
+            <span
+              className={`ml-auto shrink-0 font-mono text-[11px] rounded-sm px-2 py-1 border ${
+                boosted
+                  ? "text-primary border-primary/60 bg-primary/10"
+                  : "text-primary/80 border-primary/30"
+              }`}
+              title={boosted ? `Base score ${film.score}, boosted live` : undefined}
+              data-testid={`score-${film.tmdb_id}`}
+            >
+              {boosted ? `▲ ${film.live_score}` : film.live_score}
             </span>
           </div>
 
-          {/* Rationale (always visible, the heart of the product) */}
+          {/* Rationale (always visible, the heart of the product) —
+              live reasons from your in-app activity append to the pipeline's */}
           <div className="mt-4 max-w-2xl">
-            <Rationale reasons={film.reasons} />
+            <Rationale reasons={[...film.reasons, ...film.live_reasons]} />
           </div>
 
           <div className="mt-4 max-w-xs">
@@ -243,6 +260,7 @@ function QueueRow({
                   </div>
                 )}
               </div>
+              <FilmActions film={film} />
               <ActionButtons film={film} size="sm" />
               {film.user_review && <ReviewCallout review={film.user_review} />}
               {film.pair_with && <PairWithCard pair={film.pair_with} />}
