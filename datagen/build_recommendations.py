@@ -100,6 +100,68 @@ PULP_GENRES = {"Horror", "Thriller", "Action", "Crime", "Science Fiction",
                "Mystery", "Western"}
 PULP_GENRE_IDS = {"Horror": 27, "Thriller": 53, "Crime": 80,
                   "Science Fiction": 878, "Action": 28}
+
+# ---------------------------------------------------------------- cult channels
+#
+# Every other discover channel here sorts by `vote_average.desc`, which is a
+# machine for producing consensus: with a vote-count floor applied, the first
+# pages are the 8.0+ prestige canon and nothing else ever surfaces. Exploitation,
+# slashers, heist pictures and trash-canon sit at 5.0-7.0 on TMDB, so they were
+# not scored badly — they were never gathered in the first place.
+#
+# These channels sort by vote_count / popularity instead: "what did people
+# actually watch and argue about in this corner", not "what is best-rated
+# overall". That is the axis a genre canon lives on.
+#
+# `keywords` are resolved by name at runtime (see TMDB.keyword_id); a channel
+# whose keyword stops resolving is skipped rather than silently mis-querying.
+GENRE_IDS = {
+    "action": 28, "adventure": 12, "animation": 16, "comedy": 35, "crime": 80,
+    "documentary": 99, "drama": 18, "fantasy": 14, "horror": 27, "mystery": 9648,
+    "romance": 10749, "scifi": 878, "thriller": 53, "war": 10752, "western": 37,
+}
+_G = GENRE_IDS
+
+CULT_CHANNELS = [
+    # 70s exploitation / vigilante / grindhouse — Rolling Thunder territory.
+    {"id": "exploitation-70s", "label": "70s exploitation",
+     "params": {"with_genres": f"{_G['action']}|{_G['crime']}|{_G['thriller']}",
+                "primary_release_date.gte": "1970-01-01",
+                "primary_release_date.lte": "1980-12-31",
+                "sort_by": "vote_count.desc"}, "pages": 3},
+    # 80s slashers and video-nasty horror.
+    {"id": "slasher-80s", "label": "80s horror",
+     "params": {"with_genres": str(_G["horror"]),
+                "primary_release_date.gte": "1978-01-01",
+                "primary_release_date.lte": "1992-12-31",
+                "sort_by": "vote_count.desc"}, "pages": 3},
+    # Heist and crime-thriller — Den of Thieves, Thief, the Michael Mann lineage.
+    {"id": "heist", "label": "heist pictures", "keywords": ["heist"],
+     "params": {"sort_by": "vote_count.desc"}, "pages": 2},
+    # Neo-noir and the erotic thriller — Showgirls-adjacent, the camp canon.
+    {"id": "neo-noir", "label": "neo-noir", "keywords": ["neo-noir"],
+     "params": {"sort_by": "vote_count.desc"}, "pages": 2},
+    # Revenge pictures across eras.
+    {"id": "revenge", "label": "revenge pictures", "keywords": ["revenge"],
+     "params": {"with_genres": f"{_G['action']}|{_G['crime']}|{_G['thriller']}",
+                "sort_by": "vote_count.desc"}, "pages": 2},
+    # Contemporary genre — Barbarian, the stuff with no settled critical read yet.
+    {"id": "modern-genre", "label": "contemporary genre",
+     "params": {"with_genres": f"{_G['horror']}|{_G['thriller']}",
+                "primary_release_date.gte": "2015-01-01",
+                "sort_by": "popularity.desc"}, "pages": 3},
+    # Westerns, which the prestige sort reduces to the same four titles.
+    {"id": "western", "label": "westerns",
+     "params": {"with_genres": str(_G["western"]), "sort_by": "vote_count.desc"},
+     "pages": 2},
+]
+
+# Cult candidates get their own, much lower bar. The point is to let films the
+# consensus underrates compete at all; the scoring function decides from there.
+CULT_VOTE_FLOOR = 40      # enough votes to be a real film, not a data artifact
+CULT_VOTE_AVG = 4.6       # Showgirls sits ~5.2; the prestige gate was 6.3
+
+CULT_LABELS = {ch["id"]: ch["label"] for ch in CULT_CHANNELS}
 CANON_CAND_CAP = 300   # max candidates pulled from any single canon list (cost bound)
 COLLECTION_CAND_CAP = 220  # max candidates pulled from any single personal list
 LANE_BONUS_FALLBACK = {
@@ -337,6 +399,33 @@ def gather_candidates(tmdb, base, prof, enr):
             if tid and tid not in watched:
                 cand[tid]["sources"].add(f"genre::{name}")
 
+    # 7) cult / genre-canon discovery. Sorted by how much a film was actually
+    #    watched and argued about rather than by rating, so the exploitation,
+    #    slasher, heist and camp canons can reach the pool at all. Marked
+    #    `cult::` so the quality gate below knows to judge them differently.
+    for ch in CULT_CHANNELS:
+        params = dict(ch["params"])
+        params.setdefault("with_runtime.gte", MIN_RUNTIME)
+        params.setdefault("vote_count.gte", CULT_VOTE_FLOOR)
+        ok = True
+        for kw in ch.get("keywords", []):
+            kid = tmdb.keyword_id(kw)
+            if not kid:
+                print(f"  ! cult channel '{ch['id']}': keyword '{kw}' did not resolve; skipping")
+                ok = False
+                break
+            params["with_keywords"] = str(kid)
+        if not ok:
+            continue
+        found = 0
+        for r in tmdb.discover(params, pages=ch.get("pages", 2)):
+            tid = r.get("id")
+            if tid and tid not in watched:
+                cand[tid]["sources"].add(f"cult::{ch['id']}")
+                found += 1
+        print(f"  cult::{ch['id']:18s} {found:4d} candidates ({ch['label']})")
+    tmdb.save()
+
     print(f"  {len(cand)} distinct unseen candidates gathered.")
     return cand
 
@@ -347,7 +436,11 @@ def score_candidate(m, info, enr):
     q = m.get("vote_average") or 0
     vc = m.get("vote_count") or 0
     reasons = []
-    score = q * 8.0                                   # canonical quality, ~0-80
+    # Crowd rating, deliberately demoted. At the old x8 this term was ~80 of a
+    # ~130-point budget, so the ranking was mostly "what does TMDB rate highly"
+    # — which is the definition of a predictable slate. It still carries signal,
+    # it just no longer decides the outcome on its own.
+    score = q * 3.0                                   # ~0-30
 
     # director affinity
     best_dir, best_avg = None, 0
@@ -400,14 +493,31 @@ def score_candidate(m, info, enr):
         score += 8
         reasons.append(f"rarely-watched {lang_name(lc)}-language cinema")
 
-    # genre affinity
+    # genre affinity — was +3, the smallest term in the whole function, which is
+    # why the slate had no genre character. Now it competes with canon.
     gmatch = [g for g in m.get("genres", []) if g in enr["loved_genres"]]
     if gmatch:
-        score += 3
+        score += 14
         reasons.append(f"your kind of {gmatch[0].lower()}")
 
-    # trust nudge for very well-voted films
-    score += min(vc / 4000.0, 1.0) * 4
+    # The genre canon itself: a film a real audience watched and argued over,
+    # which the aggregate rating undersells. This is where exploitation,
+    # slashers, heist pictures and the camp canon earn their place — they are
+    # never going to win on vote_average and shouldn't have to.
+    cult_sources = sorted(s.split("::", 1)[1] for s in info["sources"] if s.startswith("cult::"))
+    if cult_sources:
+        label = CULT_LABELS.get(cult_sources[0], cult_sources[0].replace("-", " "))
+        score += 18
+        reasons.append(f"{label} — genre canon, not consensus canon")
+
+    # Under-canonised: well-liked by the people who found it, but not written to
+    # death. The old code did the opposite, adding up to +4 for high vote counts,
+    # which rewarded exactly the films least in need of another take.
+    if vc and vc < 3000 and q >= 6.0:
+        obscurity = (1.0 - min(vc, 3000) / 3000.0)    # 0 at 3000 votes, ~1 when rare
+        score += obscurity * 10
+        if vc < 800:
+            reasons.append(f"under-written-about ({vc:,} TMDB votes)")
 
     if not reasons:
         if q >= 7.5:
@@ -471,6 +581,23 @@ def mood_of(film):
     if (film.get("vote_average") or 0) >= 7.5 and (film.get("vote_count") or 0) >= 2000:
         out.add("pure-vibes")
 
+    # "slow-cinema" was declared in moods_meta but no branch here ever emitted
+    # it, so the bucket was always empty. Long, quiet, non-anglophone or
+    # contemplative work — the register the label actually promises.
+    rt_ = film.get("runtime") or 0
+    if rt_ >= 140 and not (g & PULP_GENRES) and (lc and lc != "en" or rt_ >= 170):
+        out.add("slow-cinema")
+
+    # Genre-canon moods, fed by the cult channels.
+    src = " ".join(film.get("reasons", [])).lower()
+    yr_i = int(yr) if (yr and str(yr).isdigit()) else 0
+    if 1970 <= yr_i <= 1980 and (g & {"Action", "Crime", "Thriller", "Horror"}):
+        out.add("exploitation")
+    if 1978 <= yr_i <= 1992 and "Horror" in g:
+        out.add("slasher")
+    if ("heist" in src) or (g & {"Crime"} and g & {"Thriller", "Action"}):
+        out.add("heist")
+
     rt = film.get("runtime") or 0
     if 0 < rt <= 100:
         out.add("short")
@@ -480,12 +607,38 @@ def mood_of(film):
 
 
 def build_mood_picks(meta_ids, films):
+    """Bucket films by mood, spreading them out before repeating.
+
+    Filling every bucket straight from the global ranking let the few
+    highest-scored films appear in six moods each, so picking a different mood
+    surfaced the same titles. Pass 1 gives each bucket films nothing else has
+    claimed yet; pass 2 backfills so a narrow mood is still populated.
+    """
     buckets = {mid: [] for mid in meta_ids}
     ranked = sorted(films, key=lambda f: f.get("score", 0), reverse=True)
+    claimed = set()
+
+    for f in ranked:
+        if f["tmdb_id"] in claimed:
+            continue
+        # Give it to the narrowest mood it belongs to — the one where it is
+        # hardest to replace — rather than to every mood at once.
+        mids = [mid for mid in mood_of(f) if mid in buckets]
+        if not mids:
+            continue
+        mid = min(mids, key=lambda m: len(buckets[m]))
+        if len(buckets[mid]) < MOOD_PICK_CAP:
+            buckets[mid].append(f)
+            claimed.add(f["tmdb_id"])
+
     for f in ranked:
         for mid in mood_of(f):
             if mid in buckets and len(buckets[mid]) < MOOD_PICK_CAP:
-                buckets[mid].append(f)
+                if f["tmdb_id"] not in {x["tmdb_id"] for x in buckets[mid]}:
+                    buckets[mid].append(f)
+
+    for mid in buckets:
+        buckets[mid].sort(key=lambda f: f.get("score", 0), reverse=True)
     return {mid: arr for mid, arr in buckets.items() if arr}
 
 
@@ -524,8 +677,17 @@ def build(base_path, out_path):
             continue
         vc = m.get("vote_count") or 0
         is_canon = bool(info["canon"])
-        floor = DIR_VOTE_FLOOR if (is_canon or any(s.startswith("dir::") for s in info["sources"])) else VOTE_FLOOR
-        if not is_canon and (vc < floor or (m.get("vote_average") or 0) < QUALITY_VOTE_AVG):
+        is_cult = any(s.startswith("cult::") for s in info["sources"])
+        # A cult-channel find is judged on its own terms. Holding Showgirls or a
+        # 1981 slasher to the 6.3 prestige average is what emptied the genre
+        # side of the slate: they don't fail that bar, the bar isn't about them.
+        if is_cult:
+            floor, avg_floor = CULT_VOTE_FLOOR, CULT_VOTE_AVG
+        elif is_canon or any(s.startswith("dir::") for s in info["sources"]):
+            floor, avg_floor = DIR_VOTE_FLOOR, QUALITY_VOTE_AVG
+        else:
+            floor, avg_floor = VOTE_FLOOR, QUALITY_VOTE_AVG
+        if not is_canon and (vc < floor or (m.get("vote_average") or 0) < avg_floor):
             continue
         if (m.get("runtime") or 0) < MIN_RUNTIME and "short" not in mood_of(m):
             continue

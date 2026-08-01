@@ -153,6 +153,25 @@ class TMDB:
         self._touch()
         return pid
 
+    def keyword_id(self, name):
+        """Resolve a keyword name ('heist', 'slasher') to a TMDB keyword id.
+
+        Resolved at runtime rather than hardcoded: a wrong hardcoded id fails
+        silently (discover just returns the wrong films), while a name that
+        stops resolving shows up as None and the caller can skip the channel.
+        Prefers an exact name match over TMDB's fuzzy ordering.
+        """
+        ck = f"keyword::{self._norm(name)}"
+        if ck in self.cache:
+            return self.cache[ck]
+        data = self._get("/search/keyword", {"query": name}) or {}
+        results = data.get("results") or []
+        exact = next((r for r in results if (r.get("name") or "").lower() == name.lower()), None)
+        kid = (exact or (results[0] if results else {})).get("id")
+        self.cache[ck] = kid
+        self._touch()
+        return kid
+
     def person_directed(self, person_id):
         """Return [{tmdb_id, title, year, vote_average, vote_count, poster}] of
         movies this person DIRECTED, newest first (cached by person id)."""
