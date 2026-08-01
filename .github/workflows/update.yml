@@ -104,6 +104,23 @@ jobs:
           PYTHONUTF8: "1"
         run: python datagen/mdblist_sync.py
 
+      # A push deploy skips every step above, so it would ship the data.json
+      # committed in the repo — a snapshot that can be weeks old, whose 14-day
+      # slate window has already ended. The app falls back to slates[0] when no
+      # slate matches today, so Today would sit on a date in the past until the
+      # next scheduled run.
+      #
+      # Rolling the window forward fixes that. It reuses the films already in
+      # data.json, so it needs no API keys and no network, and it leaves every
+      # curated section (queue, directors, canon, ...) untouched. The watch
+      # history stays as stale as the committed snapshot — only the scheduled
+      # runs above can refresh that — but Today is at least on today.
+      - name: Roll the slate window forward to today
+        if: github.event_name == 'push'
+        env:
+          PYTHONUTF8: "1"
+        run: python datagen/refresh_slates.py
+
       # Client-only build (dist/public). Avoids coupling the static deploy to
       # the Express server bundle, which Pages never ships.
       - name: Build site
