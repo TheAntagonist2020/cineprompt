@@ -436,11 +436,11 @@ def score_candidate(m, info, enr):
     q = m.get("vote_average") or 0
     vc = m.get("vote_count") or 0
     reasons = []
-    # Crowd rating, deliberately demoted. At the old x8 this term was ~80 of a
-    # ~130-point budget, so the ranking was mostly "what does TMDB rate highly"
-    # — which is the definition of a predictable slate. It still carries signal,
-    # it just no longer decides the outcome on its own.
-    score = q * 3.0                                   # ~0-30
+    # Crowd rating, demoted but not dethroned. At the old x8 this was ~80 of a
+    # ~130-point budget and the queue was just "what TMDB rates highly". At x3
+    # it swung too far and the canon lost ground it had earned. x6 keeps the
+    # canonical spine intact while leaving room for genre to place.
+    score = q * 6.0                                   # ~0-60
 
     # director affinity
     best_dir, best_avg = None, 0
@@ -497,7 +497,7 @@ def score_candidate(m, info, enr):
     # why the slate had no genre character. Now it competes with canon.
     gmatch = [g for g in m.get("genres", []) if g in enr["loved_genres"]]
     if gmatch:
-        score += 14
+        score += 10
         reasons.append(f"your kind of {gmatch[0].lower()}")
 
     # The genre canon itself: a film a real audience watched and argued over,
@@ -507,7 +507,7 @@ def score_candidate(m, info, enr):
     cult_sources = sorted(s.split("::", 1)[1] for s in info["sources"] if s.startswith("cult::"))
     if cult_sources:
         label = CULT_LABELS.get(cult_sources[0], cult_sources[0].replace("-", " "))
-        score += 18
+        score += 8
         reasons.append(f"{label} — genre canon, not consensus canon")
 
     # Under-canonised: well-liked by the people who found it, but not written to
@@ -515,7 +515,7 @@ def score_candidate(m, info, enr):
     # which rewarded exactly the films least in need of another take.
     if vc and vc < 3000 and q >= 6.0:
         obscurity = (1.0 - min(vc, 3000) / 3000.0)    # 0 at 3000 votes, ~1 when rare
-        score += obscurity * 10
+        score += obscurity * 5
         if vc < 800:
             reasons.append(f"under-written-about ({vc:,} TMDB votes)")
 
@@ -526,6 +526,78 @@ def score_candidate(m, info, enr):
             reasons.append("highly rated")
 
     return min(round(score), 99), reasons
+
+
+DEEP_CUT_N = 60           # size of the deep-cuts lane
+DEEP_CUT_DIR_CAP = 2      # keep one director from owning the lane
+DEEP_CUT_MIN_VOTES = 30   # below this it's usually a data artifact, not a film
+DEEP_CUT_MIN_AVG = 5.0    # trash is fine; broken metadata is not
+
+
+def surprise_score(m, info, enr):
+    """Score a film for the deep-cuts lane.
+
+    Deliberately NOT the same objective as score_candidate. That one answers
+    "is this among the best things you haven't seen", which is a question the
+    canon will always win — correctly. This one answers a different question:
+    "would seeing this title make you go, oh, I hadn't thought of that."
+
+    The strongest signal by far is a director you've already engaged with and a
+    film of theirs you haven't seen — the Walter Hill / Extreme Prejudice case.
+    You know the name, so the title re-registers instead of reading as noise.
+    """
+    vc = m.get("vote_count") or 0
+    q = m.get("vote_average") or 0
+    if vc < DEEP_CUT_MIN_VOTES or q < DEEP_CUT_MIN_AVG:
+        return 0, []
+    if not m.get("poster"):
+        return 0, []
+
+    score, reasons = 0.0, []
+
+    # A name you know, a film you don't.
+    best_dir, best_seen = None, 0
+    for dn in m.get("directors", []):
+        seen = enr["dir_seen"].get(dn, 0)
+        if seen > best_seen:
+            best_dir, best_seen = dn, seen
+    if best_dir and best_seen >= 2:
+        score += 26 + min(best_seen, 8) * 1.5
+        reasons.append(f"{best_dir} — you've seen {best_seen}, not this one")
+
+    # Obscurity is the point here, not a tiebreaker.
+    obscurity = 1.0 - min(vc, 6000) / 6000.0
+    score += obscurity * 30
+    if vc < 1200:
+        reasons.append(f"only {vc:,} TMDB votes")
+
+    # Which corner of the video store it came from.
+    cult = sorted(s.split("::", 1)[1] for s in info["sources"] if s.startswith("cult::"))
+    if cult:
+        score += 20
+        reasons.append(CULT_LABELS.get(cult[0], cult[0].replace("-", " ")))
+
+    if set(m.get("genres", [])) & PULP_GENRES:
+        score += 12
+
+    # Canon membership is disqualifying-ish: if it's on Sight & Sound you have
+    # already thought of it, which is the opposite of what this lane is for.
+    if info["canon"]:
+        score -= 18
+
+    # A rating well below consensus respectability is a feature in this lane —
+    # that's where the interesting arguments are.
+    if 5.0 <= q < 6.3:
+        score += 8
+        reasons.append(f"disreputable ({q:.1f} on TMDB)")
+
+    return round(score), reasons
+
+
+def to_deep_cut(m, score, reasons):
+    f = to_focus_film(m, score, reasons)
+    f["surprise"] = score
+    return f
 
 
 def to_focus_film(m, score, reasons):
@@ -667,6 +739,7 @@ def build(base_path, out_path):
     # --- resolve + score every candidate -----------------------------------
     print(f"Resolving + scoring {len(cand)} candidates via TMDB (cached)...")
     scored = []
+    deep = []          # deep-cuts lane, scored on a different objective
     done = 0
     for tid, info in cand.items():
         m = tmdb.movie(tid)
@@ -675,6 +748,14 @@ def build(base_path, out_path):
             print(f"  {done}/{len(cand)}"); tmdb.save()
         if not m or m.get("tmdb_id") in watched:
             continue
+
+        # The deep-cuts lane is judged BEFORE the main quality gate, on purpose.
+        # Most of what belongs here is exactly what that gate exists to reject.
+        if (m.get("runtime") or 0) >= MIN_RUNTIME:
+            ssc, sreasons = surprise_score(m, info, enr)
+            if ssc > 0:
+                deep.append((ssc, to_deep_cut(m, ssc, sreasons)))
+
         vc = m.get("vote_count") or 0
         is_canon = bool(info["canon"])
         is_cult = any(s.startswith("cult::") for s in info["sources"])
@@ -929,6 +1010,29 @@ def build(base_path, out_path):
             "background": [br[(n * 2 + j) % len(br)] for j in range(2)] if br else [],
         })
 
+    # --- deep cuts: the optionality lane -----------------------------------
+    # Everything already in the focus pools is excluded, so this is genuinely
+    # the road not taken rather than a re-skin of the queue. Capped per
+    # director so one filmography can't colonise it.
+    deep.sort(key=lambda x: x[0], reverse=True)
+    in_focus = {f["tmdb_id"] for f in (queue + focus_extra + background)}
+    deep_cuts, deep_dirs = [], Counter()
+    for ssc, f in deep:
+        if f["tmdb_id"] in in_focus:
+            continue
+        dirs = f.get("directors") or ["?"]
+        if any(deep_dirs[x] >= DEEP_CUT_DIR_CAP for x in dirs):
+            continue
+        for x in dirs:
+            deep_dirs[x] += 1
+        deep_cuts.append(f)
+        if len(deep_cuts) >= DEEP_CUT_N:
+            break
+
+    # One draw a day, rotating deterministically so the wildcard is stable
+    # within a day but different tomorrow.
+    wildcard = deep_cuts[today.toordinal() % len(deep_cuts)] if deep_cuts else None
+
     # --- assemble ----------------------------------------------------------
     d = dict(base)
     now_iso = datetime.now(timezone.utc).astimezone().isoformat()
@@ -939,6 +1043,7 @@ def build(base_path, out_path):
         "queue": queue, "focus_pool_extra": focus_extra, "background_pool": background,
         "director_targets": director_targets, "mood_picks": mood_picks,
         "slates": slates, "todays_pick": slates[0]["focus"][0],
+        "deep_cuts": deep_cuts, "wildcard": wildcard,
         "generated_at": now_iso, "last_sync": now_iso,
         "version": base.get("version", "v5"),
     })
@@ -957,6 +1062,9 @@ def build(base_path, out_path):
     print(f"  watched: {len(watched)} | rated: {stats['total_rated']} | this_week: {this_week}")
     print(f"  queue: {len(queue)} | focus_extra: {len(focus_extra)} | background: {len(background)}")
     print(f"  director_targets: {len(director_targets)} | mood buckets: {len(mood_picks)}")
+    print(f"  deep cuts: {len(deep_cuts)} (from {len(deep)} scored)")
+    for f in deep_cuts[:8]:
+        print(f"    {f['surprise']:3d}  {f['title']} ({f['year']}) — {'; '.join(f['reasons'][:2])}")
     if queue:
         print(f"  top pick: {queue[0]['title']} ({queue[0]['year']}) score={queue[0]['score']}")
         print(f"           reasons: {queue[0]['reasons']}")

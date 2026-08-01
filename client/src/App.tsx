@@ -24,6 +24,7 @@ const Screenplays = lazy(() => import("@/pages/screenplays"));
 const Weeks = lazy(() => import("@/pages/weeks"));
 const Craft = lazy(() => import("@/pages/craft"));
 const Tags = lazy(() => import("@/pages/tags"));
+const DeepCuts = lazy(() => import("@/pages/deepcuts"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function AppRouter() {
@@ -54,6 +55,7 @@ function AppRouter() {
             <Route path="/weeks" component={Weeks} />
             <Route path="/craft" component={Craft} />
             <Route path="/tags" component={Tags} />
+            <Route path="/deepcuts" component={DeepCuts} />
             <Route component={NotFound} />
           </Switch>
         </Suspense>

@@ -339,6 +339,18 @@ export interface AppData {
   // ---------- v4.1 (all optional) ----------
   diary_meta?: DiaryMeta;
   focus_pool_extra?: QueueFilm[];
+  // ---------- v5: the deep-cuts lane ----------
+  deep_cuts?: DeepCutFilm[];
+  wildcard?: DeepCutFilm;
+}
+
+/**
+ * A deep cut is scored on a different question from the queue: not "is this
+ * among the best films you haven't seen" (the canon wins that, correctly) but
+ * "would this title make you stop and go, oh — I hadn't thought of that."
+ */
+export interface DeepCutFilm extends QueueFilm {
+  surprise: number;
 }
 
 // ---------- Loader (singleton) ----------

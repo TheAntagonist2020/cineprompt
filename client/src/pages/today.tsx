@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import { Link } from "wouter";
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarDays, ListVideo, Compass, Users, Tv, Activity, RefreshCw } from "lucide-react";
+import { CalendarDays, ListVideo, Compass, Users, Tv, Activity, RefreshCw, Dices } from "lucide-react";
 import {
   useAppData,
   getPosterIndex,
@@ -229,6 +229,59 @@ export default function Today() {
                 />
               ))}
             </div>
+            </div>
+          </section>
+        )}
+
+        {/* WILDCARD — the deep-cuts lane, surfaced without being asked for.
+            Not competing with the slate above; a door next to it. */}
+        {data.wildcard && !fs.isHidden(data.wildcard.tmdb_id) && (
+          <section className="mb-16">
+            <div className="rounded-md border border-primary/30 bg-primary/[0.05] p-5 sm:p-6">
+              <div className="flex items-center gap-3 mb-5">
+                <Dices className="h-4 w-4 text-primary" />
+                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-primary">
+                  Wildcard
+                </p>
+                <span className="h-px flex-1 bg-border" />
+                <Link href="/deepcuts">
+                  <span className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.16em] text-primary/75 hover:text-primary">
+                    All deep cuts →
+                  </span>
+                </Link>
+              </div>
+              <div className="grid gap-5 sm:grid-cols-[110px_1fr]">
+                <button
+                  onClick={() => modal.open(data.wildcard!)}
+                  className="block w-full max-w-[110px]"
+                  aria-label={`Open ${data.wildcard.title}`}
+                >
+                  <Poster
+                    path={data.wildcard.poster}
+                    alt={data.wildcard.title}
+                    className="w-full aspect-[2/3] rounded-sm border border-border hover:border-primary/50 transition-colors"
+                  />
+                </button>
+                <div className="min-w-0">
+                  <button onClick={() => modal.open(data.wildcard!)} className="text-left">
+                    <h3 className="font-serif text-2xl leading-tight text-foreground hover:text-primary transition-colors">
+                      {data.wildcard.title}
+                    </h3>
+                  </button>
+                  <p className="mt-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                    {[data.wildcard.year, data.wildcard.directors?.join(", ")]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  <ul className="mt-3 space-y-1">
+                    {data.wildcard.reasons?.slice(0, 3).map((r, i) => (
+                      <li key={i} className="font-mono text-[11px] leading-relaxed text-primary/85">
+                        → {r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </div>
           </section>
         )}
