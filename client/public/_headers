@@ -4,7 +4,14 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-# data.json is regenerated up to twice a day by CI — always revalidate, but
-# let the ETag turn unchanged fetches into cheap 304s.
-/data.json
+# The sharded data payload is regenerated up to twice a day by CI. Always
+# revalidate, but let the ETag turn unchanged fetches into cheap 304s — most
+# shards (canon, craft, per-director filmographies) rarely change between
+# runs, so a repeat visit pays for a conditional request and nothing more.
+/data/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# The service worker must never be served stale, or a released fix can't
+# reach clients that already registered an older copy.
+/sw.js
   Cache-Control: public, max-age=0, must-revalidate

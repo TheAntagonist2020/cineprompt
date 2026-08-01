@@ -18,6 +18,10 @@ data.db-journal
 # generated-data backups (kept out of client/public so they never ship)
 data-backups/
 
+# sharded client payload — a build artifact derived from client/public/data.json
+# by script/data-shards.ts on every dev start and build. Never edit by hand.
+client/public/data/
+
 *.log
 .DS_Store
 

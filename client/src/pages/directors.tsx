@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
-import { useAppData } from "@/lib/data";
+import { useAppData, prefetchDirector } from "@/lib/data";
 import { Poster } from "@/components/film-ui";
 import { LoadingScreen, PageShell } from "@/components/layout";
 import { Search } from "lucide-react";
@@ -27,17 +27,16 @@ export default function Directors() {
 
   const list = useMemo(() => {
     if (!data) return [];
-    let arr = Object.entries(data.directors).map(([name, d]) => {
-      // representative poster: first seen film with a poster, else any film with poster
-      const seenWithPoster = d.films.find((f) => f.seen && f.poster);
-      const anyPoster = d.films.find((f) => f.poster);
+    let arr = Object.entries(data.directors_index).map(([name, d]) => {
       const completion = d.total > 0 ? d.seen / d.total : 0;
       return {
         name,
+        slug: d.slug,
         total: d.total,
         seen: d.seen,
         completion,
-        poster: (seenWithPoster || anyPoster)?.poster ?? null,
+        // Representative poster, chosen at build time.
+        poster: d.poster,
         avg: lovedMap[name],
         // deep-dive score: high completion + loved
         deepdive: completion * (lovedMap[name] ? lovedMap[name] / 5 + 0.5 : 0.4),
@@ -66,7 +65,7 @@ export default function Directors() {
 
   return (
     <PageShell
-      eyebrow={`${Object.keys(data.directors).length} filmographies`}
+      eyebrow={`${Object.keys(data.directors_index).length} filmographies`}
       title="Director Library"
       intro="Every director you've engaged with, with how deep you've gone. Hunt for the ones worth completing."
     >
@@ -104,8 +103,14 @@ export default function Directors() {
         {list.map((d) => {
           const pct = Math.round(d.completion * 100);
           return (
-            <Link key={d.name} href={`/directors/${encodeURIComponent(d.name)}`} data-testid={`director-${d.name}`}>
-              <div className="group cursor-pointer">
+            <Link key={d.name} href={`/directors/${d.slug}`} data-testid={`director-${d.name}`}>
+              {/* Warm the filmography on intent, so the detail page is
+                  usually already loaded by the time the click lands. */}
+              <div
+                className="group cursor-pointer"
+                onMouseEnter={() => prefetchDirector(d.slug)}
+                onFocus={() => prefetchDirector(d.slug)}
+              >
                 <div className="relative aspect-[2/3] overflow-hidden rounded-sm border border-border film-shadow">
                   <Poster
                     path={d.poster}

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import {
   Clapperboard,
   ExternalLink,
@@ -18,6 +18,7 @@ import {
   Menu,
   Bookmark,
   Library,
+  Search,
 } from "lucide-react";
 import {
   Sheet,
@@ -26,8 +27,12 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { useAppData } from "@/lib/data";
+import { useAppData, prefetchShard, type ShardName } from "@/lib/data";
 import { useFilmState } from "@/lib/filmState";
+
+// Kept out of the main bundle — the palette and its index only load when the
+// user actually reaches for search.
+const CommandPalette = lazy(() => import("@/components/command-palette"));
 
 // ---------- Sync Now: trigger the CI rebuild+deploy from inside the app ----------
 type SyncPhase = "idle" | "starting" | "running" | "done" | "error";
@@ -147,6 +152,9 @@ interface NavItem {
   label: string;
   icon: typeof Clapperboard;
   match: (p: string) => boolean;
+  // Route-scoped data shard to warm on hover/focus, so the page has its data
+  // by the time the click lands.
+  shard?: ShardName;
 }
 
 const NAV: NavItem[] = [
@@ -154,15 +162,15 @@ const NAV: NavItem[] = [
   { href: "/week", label: "Week", icon: CalendarDays, match: (p) => p === "/week" || p.startsWith("/week/") },
   { href: "/queue", label: "Queue", icon: ListVideo, match: (p) => p.startsWith("/queue") },
   { href: "/shortlist", label: "Shortlist", icon: Bookmark, match: (p) => p.startsWith("/shortlist") },
-  { href: "/collections", label: "Collections", icon: Library, match: (p) => p.startsWith("/collections") },
+  { href: "/collections", label: "Collections", icon: Library, match: (p) => p.startsWith("/collections"), shard: "collections" },
   { href: "/background", label: "Background", icon: Tv, match: (p) => p.startsWith("/background") },
   { href: "/blindspots", label: "Blind Spots", icon: Compass, match: (p) => p.startsWith("/blindspots") },
   { href: "/directors", label: "Directors", icon: Users, match: (p) => p.startsWith("/directors") },
-  { href: "/canon", label: "Canon", icon: Award, match: (p) => p.startsWith("/canon") },
+  { href: "/canon", label: "Canon", icon: Award, match: (p) => p.startsWith("/canon"), shard: "canon" },
   { href: "/weeks", label: "Themes", icon: CalendarRange, match: (p) => p.startsWith("/weeks") },
   { href: "/screenplays", label: "Screenplays", icon: BookOpen, match: (p) => p.startsWith("/screenplays") },
-  { href: "/craft", label: "Craft", icon: Aperture, match: (p) => p.startsWith("/craft") },
-  { href: "/tags", label: "Tags", icon: Tag, match: (p) => p.startsWith("/tags") },
+  { href: "/craft", label: "Craft", icon: Aperture, match: (p) => p.startsWith("/craft"), shard: "craft" },
+  { href: "/tags", label: "Tags", icon: Tag, match: (p) => p.startsWith("/tags"), shard: "tags" },
   { href: "/tracking", label: "Tracking", icon: Activity, match: (p) => p.startsWith("/tracking") },
 ];
 
@@ -196,8 +204,9 @@ function Logo() {
 export function Layout({ children }: { children: ReactNode }) {
   const [loc] = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const { data } = useAppData();
-  // "Updated" reflects when data.json was last generated (YYYY-MM-DD).
+  // "Updated" reflects when the data was last generated (YYYY-MM-DD).
   const updated = data?.generated_at ? data.generated_at.slice(0, 10) : "";
 
   // Reset scroll on route change (hash routing doesn't do this automatically).
@@ -205,6 +214,28 @@ export function Layout({ children }: { children: ReactNode }) {
     window.scrollTo(0, 0);
     setMoreOpen(false);
   }, [loc]);
+
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+
+  // ⌘K / Ctrl-K anywhere, and "/" when not already typing.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement;
+      const typing =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el instanceof HTMLElement && el.isContentEditable);
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      } else if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const mobilePrimary = NAV.filter((n) => MOBILE_PRIMARY.includes(n.href));
   const mobileMore = NAV.filter((n) => !MOBILE_PRIMARY.includes(n.href));
@@ -228,15 +259,32 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </Link>
 
+        <div className="px-3 pb-1">
+          <button
+            onClick={openSearch}
+            data-testid="button-search"
+            className="flex w-full items-center gap-2.5 rounded-sm border border-sidebar-border bg-background/40 px-3 py-2 text-left text-sidebar-foreground/60 transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <Search className="h-3.5 w-3.5" />
+            <span className="font-sans text-[13px]">Search…</span>
+            <kbd className="ml-auto rounded-sm border border-sidebar-border px-1 py-0.5 font-mono text-[9px]">
+              ⌘K
+            </kbd>
+          </button>
+        </div>
+
         {/* min-h-0 + overflow lets the nav scroll on short viewports instead of
             pushing the footer (sync control) out of the fixed sidebar */}
         <nav className="flex-1 min-h-0 overflow-y-auto px-3 mt-2 space-y-0.5">
           {NAV.map((item) => {
             const active = item.match(loc);
             const Icon = item.icon;
+            const warm = item.shard ? () => prefetchShard(item.shard!) : undefined;
             return (
               <Link key={item.href} href={item.href} data-testid={`nav-${item.label.toLowerCase().replace(/\s/g, "-")}`}>
                 <div
+                  onMouseEnter={warm}
+                  onFocus={warm}
                   className={`group flex items-center gap-3 px-3 py-2.5 rounded-sm cursor-pointer transition-colors ${
                     active
                       ? "bg-sidebar-accent text-primary"
@@ -274,9 +322,15 @@ export function Layout({ children }: { children: ReactNode }) {
             <span className="font-serif text-lg text-foreground">Cineprompt</span>
           </div>
         </Link>
-        <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground">
-          Lunara Film
-        </span>
+        <button
+          onClick={openSearch}
+          aria-label="Search the library"
+          data-testid="button-search-mobile"
+          className="inline-flex items-center gap-1.5 rounded-sm border border-border px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+        >
+          <Search className="h-3.5 w-3.5" />
+          Search
+        </button>
       </header>
 
       {/* Main */}
@@ -346,6 +400,12 @@ export function Layout({ children }: { children: ReactNode }) {
           </SheetContent>
         </Sheet>
       </nav>
+
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette onClose={() => setSearchOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

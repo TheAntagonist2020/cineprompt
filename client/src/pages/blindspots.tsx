@@ -169,7 +169,8 @@ export default function BlindSpots() {
         >
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1">
             {loved.map((d) => {
-              const known = !!data.directors[d.name];
+              const entry = data.directors_index[d.name];
+              const known = !!entry;
               const inner = (
                 <div className="flex items-center gap-3 py-2.5 border-b border-border/60 group">
                   <span className="font-mono text-xs text-primary tabular-nums w-12 shrink-0 flex items-center gap-1">
@@ -188,7 +189,7 @@ export default function BlindSpots() {
                 </div>
               );
               return known ? (
-                <Link key={d.name} href={`/directors/${encodeURIComponent(d.name)}`} data-testid={`loved-${d.name}`}>
+                <Link key={d.name} href={`/directors/${entry.slug}`} data-testid={`loved-${d.name}`}>
                   <div className="cursor-pointer">{inner}</div>
                 </Link>
               ) : (

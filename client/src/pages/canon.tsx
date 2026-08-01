@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { useAppData, tmdbUrl, letterboxdTmdbUrl, type CanonFilm } from "@/lib/data";
+import { useAppData, useShard, tmdbUrl, letterboxdTmdbUrl, type CanonFilm } from "@/lib/data";
 import { LoadingScreen, PageShell } from "@/components/layout";
 
 interface ListMeta {
@@ -24,10 +24,11 @@ function pctSeen(films: CanonFilm[]): { seen: number; total: number; pct: number
 
 export default function Canon() {
   const { data, loading } = useAppData();
+  const { shard, loading: shardLoading } = useShard("canon");
   const [open, setOpen] = useState<string | null>(null);
-  if (loading || !data) return <LoadingScreen />;
+  if (loading || !data || shardLoading) return <LoadingScreen />;
 
-  const canon = data.canon ?? {};
+  const canon = shard?.canon ?? {};
   // Prefer the data-driven order/names (canon_meta, written by build_lists.py);
   // fall back to the built-in order for older data.
   const order = data.canon_meta?.length ? data.canon_meta : LIST_ORDER;

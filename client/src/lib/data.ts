@@ -294,14 +294,29 @@ export interface Slate {
   background: BackgroundFilm[];
 }
 
+// A director as summarised in core: enough to render the /directors grid
+// without downloading a single filmography.
+export interface DirectorIndexEntry {
+  slug: string;
+  id: number;
+  seen: number;
+  total: number;
+  poster: string | null;
+}
+
+/**
+ * `AppData` is the *core* payload — what the app needs before first paint.
+ *
+ * Everything a single deep route reads (canon, collections, craft, tags, and
+ * each director's filmography) lives in a lazily-fetched shard instead; see
+ * `useShard` / `useDirector` below and `script/data-shards.ts` for the split.
+ */
 export interface AppData {
   user: User;
   generated_at: string;
   stats: Stats;
   blindspots: Blindspots;
   queue: QueueFilm[];
-  directors: Record<string, Director>;
-  watched_tmdb_set: number[];
   recent_watches: RecentWatch[];
   by_month: Record<string, number>;
   todays_pick: QueueFilm;
@@ -309,22 +324,19 @@ export interface AppData {
   background_pool: BackgroundFilm[];
   moods_meta: MoodMeta[];
   mood_picks: Record<string, MoodFilm[]>;
+  // Derived at build time so the 1.5 MB `directors` blob stays off the
+  // critical path — these cover every read Today/Tracking/Blind Spots make.
+  directors_index: Record<string, DirectorIndexEntry>;
+  poster_index: Record<string, string>;
   // ---------- v4 (all optional) ----------
   version?: string;
-  canon?: Canon;
   canon_meta?: { key: string; name: string }[];
-  collections?: Collections;
   collections_meta?: CollectionMeta[];
-  review_quotes?: Record<string, ReviewQuote>;
-  director_quotes?: Record<string, ReviewQuote[]>;
-  craft_dimensions?: CraftDimensions;
   pair_with?: Record<string, PairWith>;
   director_targets?: Record<string, DirectorTarget>;
   screenplays?: Screenplays;
   themed_weeks?: ThemedWeek[];
   // ---------- v4.1 (all optional) ----------
-  tags?: Record<string, TagEntry>;
-  diary_ratings?: Record<string, number>;
   diary_meta?: DiaryMeta;
   focus_pool_extra?: QueueFilm[];
 }
@@ -333,15 +345,22 @@ export interface AppData {
 let cache: AppData | null = null;
 let inflight: Promise<AppData> | null = null;
 
+const DATA_BASE = "./data";
+
+function fetchJson<T>(url: string): Promise<T> {
+  return fetch(url).then((r) => {
+    if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+    return r.json() as Promise<T>;
+  });
+}
+
 export function loadData(): Promise<AppData> {
   if (cache) return Promise.resolve(cache);
   if (inflight) return inflight;
-  inflight = fetch("./data.json")
-    .then((r) => r.json())
-    .then((d: AppData) => {
-      cache = d;
-      return d;
-    });
+  inflight = fetchJson<AppData>(`${DATA_BASE}/core.json`).then((d) => {
+    cache = d;
+    return d;
+  });
   return inflight;
 }
 
@@ -368,17 +387,160 @@ export function useAppData(): { data: AppData | null; loading: boolean } {
   return { data, loading };
 }
 
+// ---------- Lazy route shards ----------
+export interface ShardMap {
+  canon: { canon?: Canon };
+  collections: { collections?: Collections };
+  craft: { craft_dimensions?: CraftDimensions };
+  tags: { tags?: Record<string, TagEntry> };
+  search: SearchIndex;
+}
+export type ShardName = keyof ShardMap;
+
+const shardCache = new Map<string, unknown>();
+const shardInflight = new Map<string, Promise<unknown>>();
+
+/** Fetch a shard once; concurrent callers share the same request. */
+export function loadShard<K extends ShardName>(name: K): Promise<ShardMap[K]> {
+  const hit = shardCache.get(name);
+  if (hit) return Promise.resolve(hit as ShardMap[K]);
+  const pending = shardInflight.get(name);
+  if (pending) return pending as Promise<ShardMap[K]>;
+  const p = fetchJson<ShardMap[K]>(`${DATA_BASE}/${name}.json`)
+    .then((d) => {
+      shardCache.set(name, d);
+      return d;
+    })
+    .finally(() => shardInflight.delete(name));
+  shardInflight.set(name, p);
+  return p;
+}
+
+/** Warm a shard ahead of navigation (hover/focus on a nav link). */
+export function prefetchShard(name: ShardName): void {
+  void loadShard(name).catch(() => {});
+}
+
+export function useShard<K extends ShardName>(
+  name: K,
+): { shard: ShardMap[K] | null; loading: boolean; error: boolean } {
+  const [shard, setShard] = useState<ShardMap[K] | null>(
+    () => (shardCache.get(name) as ShardMap[K]) ?? null,
+  );
+  const [loading, setLoading] = useState(!shardCache.has(name));
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const hit = shardCache.get(name) as ShardMap[K] | undefined;
+    if (hit) {
+      setShard(hit);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    loadShard(name)
+      .then((d) => alive && (setShard(d), setLoading(false)))
+      .catch(() => alive && (setError(true), setLoading(false)));
+    return () => {
+      alive = false;
+    };
+  }, [name]);
+  return { shard, loading, error };
+}
+
+// ---------- Per-director shards ----------
+export interface DirectorShard extends Director {
+  name: string;
+  quotes: ReviewQuote[];
+}
+
+const directorCache = new Map<string, DirectorShard>();
+const directorInflight = new Map<string, Promise<DirectorShard>>();
+
+export function loadDirector(slug: string): Promise<DirectorShard> {
+  const hit = directorCache.get(slug);
+  if (hit) return Promise.resolve(hit);
+  const pending = directorInflight.get(slug);
+  if (pending) return pending;
+  const p = fetchJson<DirectorShard>(`${DATA_BASE}/directors/${slug}.json`)
+    .then((d) => {
+      directorCache.set(slug, d);
+      return d;
+    })
+    .finally(() => directorInflight.delete(slug));
+  directorInflight.set(slug, p);
+  return p;
+}
+
+export function prefetchDirector(slug: string | undefined): void {
+  if (slug) void loadDirector(slug).catch(() => {});
+}
+
+/** Load one director's filmography (~10-55 KB) instead of all 143 (1.5 MB). */
+export function useDirector(
+  slug: string | undefined,
+): { director: DirectorShard | null; loading: boolean; error: boolean } {
+  const [director, setDirector] = useState<DirectorShard | null>(
+    () => (slug ? directorCache.get(slug) ?? null : null),
+  );
+  const [loading, setLoading] = useState(!!slug && !directorCache.has(slug));
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!slug) {
+      setDirector(null);
+      setLoading(false);
+      setError(true);
+      return;
+    }
+    const hit = directorCache.get(slug);
+    if (hit) {
+      setDirector(hit);
+      setLoading(false);
+      setError(false);
+      return;
+    }
+    setLoading(true);
+    setError(false);
+    loadDirector(slug)
+      .then((d) => alive && (setDirector(d), setLoading(false)))
+      .catch(() => alive && (setError(true), setLoading(false)));
+    return () => {
+      alive = false;
+    };
+  }, [slug]);
+  return { director, loading, error };
+}
+
+// ---------- Search index (command palette) ----------
+// Tuple rows keep the index compact; see script/data-shards.ts.
+export type SearchFilmRow = [
+  tmdb_id: number,
+  title: string,
+  year: string | number,
+  director: string,
+  poster: string | null,
+  seen: 0 | 1,
+];
+export type SearchDirectorRow = [name: string, slug: string, seen: number, total: number];
+export type SearchCollectionRow = [key: string, name: string, total: number];
+export interface SearchIndex {
+  films: SearchFilmRow[];
+  directors: SearchDirectorRow[];
+  collections: SearchCollectionRow[];
+}
+
 // ---------- Poster index (tmdb_id -> poster path) ----------
+// Precomputed by the shard generator across every film the app knows about.
 let posterIndex: Map<number, string | null> | null = null;
 export function getPosterIndex(d: AppData): Map<number, string | null> {
   if (posterIndex) return posterIndex;
   const m = new Map<number, string | null>();
-  for (const q of d.queue) m.set(q.tmdb_id, q.poster);
-  for (const name of Object.keys(d.directors)) {
-    for (const f of d.directors[name].films) {
-      if (!m.has(f.tmdb_id)) m.set(f.tmdb_id, f.poster);
-    }
+  for (const [id, poster] of Object.entries(d.poster_index ?? {})) {
+    m.set(Number(id), poster);
   }
+  // data.json predating the poster_index still renders, just from the queue.
+  if (m.size === 0) for (const q of d.queue) m.set(q.tmdb_id, q.poster);
   posterIndex = m;
   return m;
 }

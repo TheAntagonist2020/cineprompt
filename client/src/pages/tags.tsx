@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, X, Star, StarHalf, ExternalLink, ArrowDownAZ, Film } from "lucide-react";
 import {
   useAppData,
+  useShard,
   letterboxdSlugUrl,
   type TagEntry,
   type TagFilm,
@@ -176,12 +177,13 @@ function LetterboxdCard({ film }: { film: TagFilm }) {
 
 export default function Tags() {
   const { data, loading } = useAppData();
+  const { shard, loading: shardLoading } = useShard("tags");
   const [category, setCategory] = useState<"all" | TagCategory>("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("films");
   const [selected, setSelected] = useState<string[]>([]);
 
-  const tagsObj = data?.tags ?? {};
+  const tagsObj = shard?.tags ?? {};
   const meta = data?.diary_meta;
 
   // Precompute a Set of "title|year" per tag for fast intersection.
@@ -250,7 +252,7 @@ export default function Tags() {
     return { tags: valid, films, single: false as const, entry: null };
   }, [selected, tagsObj, tagFilmSets]);
 
-  if (loading || !data) return <LoadingScreen />;
+  if (loading || !data || shardLoading) return <LoadingScreen />;
 
   const subtitle = meta
     ? `${meta.total_tags} hand-curated tags across ${meta.total_entries.toLocaleString()} diary entries`

@@ -1,6 +1,7 @@
 import { Link, useParams } from "wouter";
 import {
   useAppData,
+  useDirector,
   formatRuntime,
   tmdbUrl,
   stripHtml,
@@ -16,10 +17,20 @@ import { ArrowLeft, Check, Star, Plus } from "lucide-react";
 export default function DirectorDetail() {
   const { data, loading } = useAppData();
   const params = useParams();
-  const name = decodeURIComponent(params.name || "");
+  const param = decodeURIComponent(params.name || "");
 
-  if (loading || !data) return <LoadingScreen />;
-  const dir = data.directors[name];
+  // Routes are slug-based now, but links shared before the change used the
+  // director's name — resolve either through the core index.
+  const slug = data
+    ? data.directors_index[param]?.slug ??
+      (Object.values(data.directors_index).some((d) => d.slug === param) ? param : undefined)
+    : undefined;
+
+  const { director: dir, loading: dirLoading } = useDirector(slug);
+
+  if (loading || !data || (slug && dirLoading)) return <LoadingScreen />;
+
+  const name = dir?.name ?? param;
 
   if (!dir) {
     return (
@@ -49,7 +60,7 @@ export default function DirectorDetail() {
   const pct = dir.total > 0 ? Math.round((dir.seen / dir.total) * 100) : 0;
 
   const target = data.director_targets?.[name];
-  const quotes = (data.director_quotes?.[name] ?? []).slice(0, 3);
+  const quotes = (dir.quotes ?? []).slice(0, 3);
 
   return (
     <div className="pb-12">

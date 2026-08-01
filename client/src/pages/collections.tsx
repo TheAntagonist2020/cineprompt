@@ -6,6 +6,7 @@ import {
   posterUrl,
   tmdbUrl,
   useAppData,
+  useShard,
   type CollectionFilm,
   type CollectionMeta,
 } from "@/lib/data";
@@ -27,6 +28,7 @@ type ShufflePick = {
 
 export default function Collections() {
   const { data, loading } = useAppData();
+  const { shard, loading: shardLoading } = useShard("collections");
   const [query, setQuery] = useState("");
   const [lane, setLane] = useState<string>("all");
   const [open, setOpen] = useState<string | null>(null);
@@ -58,7 +60,7 @@ export default function Collections() {
   }, [data, query, lane]);
 
   const shufflePool = useMemo(() => {
-    const collections = data?.collections ?? {};
+    const collections = shard?.collections ?? {};
     const byFilm = new Map<string, ShufflePick>();
     for (const meta of lists) {
       for (const film of collections[meta.key] ?? []) {
@@ -68,7 +70,7 @@ export default function Collections() {
       }
     }
     return Array.from(byFilm.values());
-  }, [data, lists]);
+  }, [shard, lists]);
 
   function drawRandom() {
     if (!shufflePool.length) return;
@@ -76,9 +78,9 @@ export default function Collections() {
     setPick(shufflePool[Math.floor(Math.random() * shufflePool.length)]);
   }
 
-  if (loading || !data) return <LoadingScreen />;
+  if (loading || !data || shardLoading) return <LoadingScreen />;
 
-  const collections = data.collections ?? {};
+  const collections = shard?.collections ?? {};
   const totalLists = data.collections_meta?.length ?? 0;
   const totalTitles = data.collections_meta?.reduce((sum, m) => sum + m.total, 0) ?? 0;
   const totalUnseen = data.collections_meta?.reduce((sum, m) => sum + m.unseen, 0) ?? 0;

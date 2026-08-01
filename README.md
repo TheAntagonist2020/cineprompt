@@ -2,7 +2,9 @@
 
 A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd.com/daltonjohnson/) · [lunarafilm.com](https://lunarafilm.com)). It turns a Letterboxd + Trakt + TMDB viewing history (4,500+ films) into a daily "what to watch" cockpit: a rotating daily slate, a scored recommendation queue, blind-spot analysis, director completion targets, canon checklists, screenplay reading lists, craft (cinematographer/composer) tracking, themed weeks, a tag explorer, and a mood-based picker.
 
-The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file, which the React client loads at startup. The Express server only serves the built client — there is no database or API at runtime.
+The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. The Express server only serves the built client — there is no database or API at runtime.
+
+Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library — every film in every filmography, collection, and canon list, plus directors and collections by name.
 
 ## Stack
 
@@ -108,7 +110,35 @@ sync) are still here; they refresh the *seen* side but recycle the existing pool
 | `npm run data:sync` | Sync watched set / stats / blindspots from Trakt |
 | `npm run data:letterboxd` | Fold in recent Letterboxd diary via public RSS (catches Criterion Channel & anything Trakt missed) |
 | `npm run data:rebuild` | Full recommendation rebuild (discovers fresh unseen picks) |
+| `npm run data:shards` | Re-split `data.json` into the client shards (dev/build do this automatically) |
 | `npm run cf:deploy` | Build + deploy to Cloudflare Pages (manual; CI does this automatically) |
+
+## Data payload
+
+The pipeline writes one ~6.5 MB `client/public/data.json`. The client never
+fetches that file. On every dev start and every build,
+[`script/data-shards.ts`](script/data-shards.ts) derives from it:
+
+| File | Size | Fetched |
+| --- | --- | --- |
+| `data/core.json` | 1.1 MB (382 KB gz) | at startup — everything first paint needs |
+| `data/collections.json` | 1.4 MB | on `/collections` |
+| `data/tags.json` | 787 KB | on `/tags` |
+| `data/search.json` | 676 KB | on first ⌘K |
+| `data/canon.json` | 475 KB | on `/canon` |
+| `data/craft.json` | 97 KB | on `/craft` |
+| `data/directors/<slug>.json` | 3–55 KB × 143 | one file, on that director's page |
+
+That takes the critical path from **1.77 MB gzipped to 382 KB** — an 82.5%
+cut — because ~1.2 MB was data no client code read at all (`review_quotes`,
+`diary_ratings`, `watched_tmdb_set`) and the rest belonged to one deep route
+each. Nav links warm their shard on hover, so navigation usually finds the
+data already there.
+
+The pipeline is untouched by this: it keeps reading and writing
+`client/public/data.json` exactly as before, and the split runs downstream.
+`client/public/data/` is git-ignored — always reproducible with
+`npm run data:shards`.
 
 ## Deployment & auto-update
 
@@ -123,10 +153,16 @@ gated privately to your email via Cloudflare Access. Full setup in
 
 ```
 client/          React SPA
-  public/data.json   precomputed app data (~5 MB)
+  public/data.json   precomputed app data (~6.5 MB, pipeline output)
+  public/data/       generated shards the client actually fetches (git-ignored)
+  public/sw.js       service worker (offline + instant repeat loads)
   src/pages/         one file per route (today, queue, directors, ...)
-  src/lib/data.ts    data types + loader + helpers
+  src/lib/data.ts    data types + core/shard loaders + helpers
   src/lib/mood.tsx   mood-engine pick logic
+  src/components/command-palette.tsx  ⌘K search over the whole library
+script/
+  data-shards.ts     splits data.json into core + lazy shards (build step)
+  make_icons.py      regenerates the favicon / PWA icons from the reel logo
 server/          Express app (index, routes, static, vite middleware)
 datagen/         Python data pipeline (TMDB / Trakt / Letterboxd)
   build_recommendations.py  the discovery engine (fresh unseen picks)

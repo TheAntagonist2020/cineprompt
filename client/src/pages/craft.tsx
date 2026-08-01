@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import {
   useAppData,
+  useShard,
   tmdbUrl,
   letterboxdTmdbUrl,
   type CraftEntry,
@@ -14,12 +15,13 @@ type Tab = "cinematographers" | "composers";
 
 export default function Craft() {
   const { data, loading } = useAppData();
+  const { shard, loading: shardLoading } = useShard("craft");
   const [tab, setTab] = useState<Tab>("cinematographers");
   const [open, setOpen] = useState<string | null>(null);
-  if (loading || !data) return <LoadingScreen />;
 
-  const dims = data.craft_dimensions;
+  const dims = shard?.craft_dimensions;
 
+  // Must stay above the early return — hooks cannot run conditionally.
   const entries = useMemo(() => {
     if (!dims) return [];
     const record = dims[tab] ?? {};
@@ -27,6 +29,8 @@ export default function Craft() {
       .sort((a, b) => b[1].seen_count - a[1].seen_count)
       .slice(0, 30);
   }, [dims, tab]);
+
+  if (loading || !data || shardLoading) return <LoadingScreen />;
 
   return (
     <PageShell

@@ -1,0 +1,16 @@
+{
+  "name": "Cineprompt",
+  "short_name": "Cineprompt",
+  "description": "A film-watching companion for serious cinephiles. Today's pick, the queue, blind spots, directors, and viewing pace.",
+  "start_url": "./#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f0f10",
+  "theme_color": "#0f0f10",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
