@@ -14,7 +14,7 @@ Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library —
 
 ## Prerequisites
 
-- Node.js 18+ (developed on Node 24)
+- Node.js 20.19+ or 22.12+ (developed on Node 22; see `.node-version`)
 - Python 3.10+ (only needed to regenerate data)
 
 ## Run it
