@@ -84,11 +84,29 @@ you (no password to manage).
    **and** all previews), then save.
 4. **Policies → Add a policy:** Action **Allow**; Include → **Emails** →
    `daltino1@gmail.com`. (Optionally also Include Login method = One-time PIN.) Save.
-5. Test in an incognito window: visiting the site should prompt for the emailed PIN;
+5. ⚠️ **Set the session duration — do not skip this.** Still in **Configure**, find
+   **Session Duration** and change it from the default **24 hours** to **1 month**
+   (the longest offered). Save.
+
+   The default means a fresh 6-digit email code *every day* on *every device*. On a
+   phone that's tedious; on a TV box it's bad enough that you stop opening the app
+   at all. One month turns the login into something you do a few times a year.
+   Re-check this setting if the PIN prompts ever come back — it is the first thing
+   to look at.
+6. Test in an incognito window: visiting the site should prompt for the emailed PIN;
    any other email is refused.
+
+Once you're in on a device, **add the site to your home screen** (Safari/Chrome →
+Share → Add to Home Screen). It opens without browser chrome and keeps its own
+Access cookie, so the session sticks around instead of being cleared with your tabs.
 
 > Gotcha: an email that doesn't match the policy fails *silently* (it just never
 > receives a code), so make sure the policy address matches exactly.
+
+> Prefer no login at all? The data behind the dashboard comes from your **public**
+> Letterboxd and Trakt profiles, so gating it mostly protects your notes and
+> shortlist. Deleting the Access application makes the site public and removes the
+> login entirely — a legitimate trade if the friction is what's keeping you out.
 
 ## Enable the in-app "Sync now" button
 
