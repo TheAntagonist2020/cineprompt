@@ -108,6 +108,35 @@ Access cookie, so the session sticks around instead of being cleared with your t
 > shortlist. Deleting the Access application makes the site public and removes the
 > login entirely — a legitimate trade if the friction is what's keeping you out.
 
+## Get nudged to actually watch something
+
+The site waits for you to visit it, which is how you end up not watching
+anything for a month. The evening run also pushes the picks to your phone, so
+the message itself is enough to decide on — you never have to open the site.
+
+Uses [ntfy](https://ntfy.sh): free, no account, no signup.
+
+1. Install **ntfy** (iOS App Store / Google Play / F-Droid).
+2. In the app, **Subscribe to topic** and invent a name. Treat it like a
+   password — anyone who knows it can read your picks (and send you things).
+   Something like `cineprompt-<a few random words>` is fine.
+3. GitHub → repo **Settings → Secrets and variables → Actions → New secret**:
+   name `NTFY_TOPIC`, value the topic name from step 2.
+
+That's it. The evening run (17:17 CT) sends a nudge, and its tone escalates the
+longer you go without logging anything — a quiet couple of days reads
+differently from a quiet month. `Run workflow` sends one on demand.
+
+If `NTFY_TOPIC` is unset the step composes the message, logs it, and sends
+nothing, so nothing breaks by leaving it off.
+
+> Self-hosting ntfy? Set `NTFY_SERVER` to your server's URL as well.
+
+**This is also your break-glass alarm.** With `NTFY_TOPIC` set, a failed
+scheduled run pushes a high-priority alert instead of failing silently — which
+is the difference between fixing a dead Trakt token today and discovering it
+six weeks from now.
+
 ## Enable the in-app "Sync now" button
 
 The sidebar's **Sync now** button triggers the same `Update & Deploy Cineprompt`
