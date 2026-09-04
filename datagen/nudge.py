@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime
 
-SITE_URL = os.environ.get("SITE_URL", "https://cineprompt.pages.dev")
+SITE_URL = os.environ.get("SITE_URL") or "https://cineprompt.pages.dev"
 MAX_PICKS = 3
 
 
@@ -167,7 +167,7 @@ def main():
         print("nudge: NTFY_TOPIC unset — composed the nudge but sent nothing.")
         return 0
 
-    server = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
+    server = (os.environ.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
     payload = json.dumps(
         {
             "topic": topic,
