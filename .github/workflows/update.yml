@@ -77,6 +77,7 @@ jobs:
       # all) reach the site: you log them on Letterboxd, they land here.
       # Non-fatal so a Letterboxd hiccup never blocks the deploy.
       - name: Sync recent Letterboxd diary (RSS)
+        id: letterboxd
         if: github.event_name != 'push'
         continue-on-error: true
         env:
@@ -87,6 +88,7 @@ jobs:
       # Rebuild the Canon checklists from your own MDBList lists (exact TMDB ids
       # -> accurate seen/unseen). Non-fatal so a MDBList hiccup never blocks deploy.
       - name: Rebuild canon from your MDBList lists
+        id: canon
         if: github.event_name != 'push'
         continue-on-error: true
         env:
@@ -97,6 +99,7 @@ jobs:
       # Push the current picks to the "Cineprompt — Tonight" MDBList list, which
       # surfaces in Stremio. Non-fatal: a MDBList hiccup must not block the deploy.
       - name: Sync picks to MDBList (Stremio)
+        id: mdblist
         if: github.event_name != 'push'
         continue-on-error: true
         env:
@@ -147,3 +150,72 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
           command: pages deploy dist/public --project-name=cineprompt --branch=main
+
+      # ---- The push half -------------------------------------------------
+      # Everything above updates the site and waits for you to visit it. This
+      # sends the picks to your phone so the site doesn't have to be visited
+      # at all. Evening run + manual dispatch only: a nudge at 08:17 is noise.
+      # Runs after the deploy and is non-fatal, so it can never cost a deploy.
+      - name: Nudge me to watch something
+        id: nudge
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          github.event.schedule == '17 22 * * *'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          PYTHONUTF8: "1"
+        run: python datagen/nudge.py client/public/data.json
+
+      # Several steps above are continue-on-error, so the job goes green even
+      # when they all failed and the data never actually refreshed. Spell out
+      # what really happened, so a green check can be trusted.
+      - name: Report what actually ran
+        if: always()
+        run: |
+          {
+            echo "### Data freshness"
+            echo
+            echo "| Step | Outcome |"
+            echo "| --- | --- |"
+            echo "| Letterboxd diary (RSS) | ${{ steps.letterboxd.outcome || 'skipped' }} |"
+            echo "| Canon from MDBList | ${{ steps.canon.outcome || 'skipped' }} |"
+            echo "| Picks to MDBList (Stremio) | ${{ steps.mdblist.outcome || 'skipped' }} |"
+            echo "| Phone nudge | ${{ steps.nudge.outcome || 'skipped' }} |"
+            echo
+            echo "\`generated_at\` in the deployed payload:"
+            echo
+            echo '```'
+            python -c "import json;print(json.load(open('client/public/data.json')).get('generated_at','(missing)'))"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A broken loop that fails quietly is how the site ends up serving
+      # two-month-old picks with nobody noticing. Make it shout.
+      - name: Alert me if this run broke
+        if: failure()
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$NTFY_TOPIC" ] || { echo "NTFY_TOPIC unset - no alert sent."; exit 0; }
+          python - <<'EOF'
+          import json, os, urllib.request
+          server = (os.environ.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
+          body = json.dumps({
+              "topic": os.environ["NTFY_TOPIC"],
+              "title": "Cineprompt update failed",
+              "message": "The scheduled rebuild broke, so the site is serving "
+                         "stale picks until it is fixed.",
+              "priority": 5,
+              "tags": ["rotating_light"],
+              "click": os.environ.get("RUN_URL", ""),
+          }).encode()
+          req = urllib.request.Request(server + "/", data=body,
+                                       headers={"Content-Type": "application/json"},
+                                       method="POST")
+          with urllib.request.urlopen(req, timeout=20) as r:
+              print("alert sent:", r.status)
+          EOF

@@ -84,11 +84,58 @@ you (no password to manage).
    **and** all previews), then save.
 4. **Policies → Add a policy:** Action **Allow**; Include → **Emails** →
    `daltino1@gmail.com`. (Optionally also Include Login method = One-time PIN.) Save.
-5. Test in an incognito window: visiting the site should prompt for the emailed PIN;
+5. ⚠️ **Set the session duration — do not skip this.** Still in **Configure**, find
+   **Session Duration** and change it from the default **24 hours** to **1 month**
+   (the longest offered). Save.
+
+   The default means a fresh 6-digit email code *every day* on *every device*. On a
+   phone that's tedious; on a TV box it's bad enough that you stop opening the app
+   at all. One month turns the login into something you do a few times a year.
+   Re-check this setting if the PIN prompts ever come back — it is the first thing
+   to look at.
+6. Test in an incognito window: visiting the site should prompt for the emailed PIN;
    any other email is refused.
+
+Once you're in on a device, **add the site to your home screen** (Safari/Chrome →
+Share → Add to Home Screen). It opens without browser chrome and keeps its own
+Access cookie, so the session sticks around instead of being cleared with your tabs.
 
 > Gotcha: an email that doesn't match the policy fails *silently* (it just never
 > receives a code), so make sure the policy address matches exactly.
+
+> Prefer no login at all? The data behind the dashboard comes from your **public**
+> Letterboxd and Trakt profiles, so gating it mostly protects your notes and
+> shortlist. Deleting the Access application makes the site public and removes the
+> login entirely — a legitimate trade if the friction is what's keeping you out.
+
+## Get nudged to actually watch something
+
+The site waits for you to visit it, which is how you end up not watching
+anything for a month. The evening run also pushes the picks to your phone, so
+the message itself is enough to decide on — you never have to open the site.
+
+Uses [ntfy](https://ntfy.sh): free, no account, no signup.
+
+1. Install **ntfy** (iOS App Store / Google Play / F-Droid).
+2. In the app, **Subscribe to topic** and invent a name. Treat it like a
+   password — anyone who knows it can read your picks (and send you things).
+   Something like `cineprompt-<a few random words>` is fine.
+3. GitHub → repo **Settings → Secrets and variables → Actions → New secret**:
+   name `NTFY_TOPIC`, value the topic name from step 2.
+
+That's it. The evening run (17:17 CT) sends a nudge, and its tone escalates the
+longer you go without logging anything — a quiet couple of days reads
+differently from a quiet month. `Run workflow` sends one on demand.
+
+If `NTFY_TOPIC` is unset the step composes the message, logs it, and sends
+nothing, so nothing breaks by leaving it off.
+
+> Self-hosting ntfy? Set `NTFY_SERVER` to your server's URL as well.
+
+**This is also your break-glass alarm.** With `NTFY_TOPIC` set, a failed
+scheduled run pushes a high-priority alert instead of failing silently — which
+is the difference between fixing a dead Trakt token today and discovering it
+six weeks from now.
 
 ## Enable the in-app "Sync now" button
 
