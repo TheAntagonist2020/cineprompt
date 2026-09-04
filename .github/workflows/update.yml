@@ -7,8 +7,9 @@ name: Update & Deploy Cineprompt
 on:
   schedule:
     # Cron is ALWAYS UTC and ignores DST. Central is UTC-5 (CDT) / UTC-6 (CST).
-    - cron: "17 13 * * *"   # ~morning CT (08:17 CDT / 07:17 CST)
-    - cron: "17 22 * * *"   # ~late afternoon CT (17:17 CDT / 16:17 CST)
+    - cron: "17 13 * * *"   # ~morning CT (08:17 CDT / 07:17 CST): refresh only, no nudge
+    - cron: "30 0 * * *"    # ~evening CT (19:30 CDT / 18:30 CST): refresh + the nudge
+    - cron: "0 2 * * *"     # ~late CT (21:00 CDT / 20:00 CST): follow-up, only if nothing logged today
   workflow_dispatch: {}
   push:
     branches: [main]
@@ -58,6 +59,48 @@ jobs:
           key: tmdb-cache-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             tmdb-cache-${{ runner.os }}-
+
+      # Hand the latest rebuilt data.json from scheduled runs to push deploys.
+      # A code push skips the rebuild, so without this it ships whatever
+      # snapshot is committed in the repo, which can be weeks old. Same
+      # rotating-key pattern as the TMDB cache: every run saves at the end,
+      # every run restores the most recent prior copy at the start.
+      - name: Restore latest rebuilt data
+        uses: actions/cache@v6
+        with:
+          path: client/public/data.json
+          key: data-json-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            data-json-${{ runner.os }}-
+
+      # The restore overwrites the checked-out file even when the commit is
+      # newer (a fresh data.json committed by hand). Keep whichever is fresher.
+      - name: Keep the fresher data.json
+        id: fresher
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python - <<'EOF'
+          import json, os, subprocess
+          path = "client/public/data.json"
+          def stamp(text):
+              try:
+                  return json.loads(text).get("generated_at") or ""
+              except Exception:
+                  return ""
+          restored = stamp(open(path, encoding="utf-8").read())
+          committed = stamp(subprocess.run(["git", "show", f"HEAD:{path}"],
+                                           capture_output=True, text=True).stdout)
+          if committed >= restored:
+              subprocess.run(["git", "checkout", "--", path], check=True)
+              chosen = "committed"
+              print(f"kept committed data.json ({committed}); cache had {restored or 'nothing newer'}")
+          else:
+              chosen = "restored from last run"
+              print(f"kept restored data.json ({restored}) over committed ({committed})")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"source={chosen}\n")
+          EOF
 
       - name: Install JS deps
         run: npm ci
@@ -160,11 +203,16 @@ jobs:
         id: nudge
         if: >-
           github.event_name == 'workflow_dispatch' ||
-          github.event.schedule == '17 22 * * *'
+          github.event.schedule == '30 0 * * *' ||
+          github.event.schedule == '0 2 * * *'
         continue-on-error: true
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          # the 9pm run is the quiet follow-up; everything else is the main nudge
+          NUDGE_MODE: ${{ github.event.schedule == '0 2 * * *' && 'followup' || 'evening' }}
+          # repo variable (Settings -> Variables): set to 1 to use web.stremio.com links
+          STREMIO_WEB: ${{ vars.STREMIO_WEB }}
           PYTHONUTF8: "1"
         run: python datagen/nudge.py client/public/data.json
 
@@ -183,6 +231,9 @@ jobs:
             echo "| Canon from MDBList | ${{ steps.canon.outcome || 'skipped' }} |"
             echo "| Picks to MDBList (Stremio) | ${{ steps.mdblist.outcome || 'skipped' }} |"
             echo "| Phone nudge | ${{ steps.nudge.outcome || 'skipped' }} |"
+            echo "| data.json source | ${{ steps.fresher.outputs.source || 'n/a' }} |"
+            echo
+            echo "Trigger: \`${{ github.event_name }}\` ${{ github.event.schedule }}"
             echo
             echo "\`generated_at\` in the deployed payload:"
             echo
@@ -194,21 +245,28 @@ jobs:
       # A broken loop that fails quietly is how the site ends up serving
       # two-month-old picks with nobody noticing. Make it shout.
       - name: Alert me if this run broke
-        if: failure()
+        if: failure() || steps.nudge.outcome == 'failure'
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          NUDGE_OUTCOME: ${{ steps.nudge.outcome }}
+          JOB_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           [ -n "$NTFY_TOPIC" ] || { echo "NTFY_TOPIC unset - no alert sent."; exit 0; }
           python - <<'EOF'
           import json, os, urllib.request
           server = (os.environ.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
+          nudge_only = (os.environ.get("JOB_STATUS") == "success"
+                        and os.environ.get("NUDGE_OUTCOME") == "failure")
           body = json.dumps({
               "topic": os.environ["NTFY_TOPIC"],
-              "title": "Cineprompt update failed",
-              "message": "The scheduled rebuild broke, so the site is serving "
-                         "stale picks until it is fixed.",
+              "title": "Cineprompt nudge crashed" if nudge_only else "Cineprompt update failed",
+              "message": ("The site deployed fine, but the phone nudge crashed, so no picks "
+                          "were sent tonight. The run log has the traceback."
+                          if nudge_only else
+                          "The scheduled rebuild broke, so the site is serving "
+                          "stale picks until it is fixed."),
               "priority": 5,
               "tags": ["rotating_light"],
               "click": os.environ.get("RUN_URL", ""),

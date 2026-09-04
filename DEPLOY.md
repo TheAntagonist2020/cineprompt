@@ -123,9 +123,41 @@ Uses [ntfy](https://ntfy.sh): free, no account, no signup.
 3. GitHub → repo **Settings → Secrets and variables → Actions → New secret**:
    name `NTFY_TOPIC`, value the topic name from step 2.
 
-That's it. The evening run (17:17 CT) sends a nudge, and its tone escalates the
-longer you go without logging anything — a quiet couple of days reads
-differently from a quiet month. `Run workflow` sends one on demand.
+That's it. Two nudges a night, and each film in them is a **button that opens it
+in Stremio**:
+
+- **~7:30pm CT** — the main one: three picks with the poster of the first, a
+  button per film, and a tone that escalates the longer you've been quiet. Picks
+  rotate daily through the top of the queue so it's never the same three, always
+  include one under 100 minutes on a weeknight, and save the three-hour ones for
+  Friday and Saturday.
+- **~9pm CT** — a quiet follow-up with one easy pick, sent **only if nothing was
+  logged that day**. If you already watched something, it stays silent.
+
+If you logged a film today, the evening message says so and eases off instead of
+piling on, and keeps count of your streak. `Run workflow` sends the main nudge on
+demand.
+
+Times are UTC crons, so they drift an hour when clocks change; adjust the two
+evening crons in `.github/workflows/update.yml` if that bothers you.
+
+### Tap straight into Stremio
+
+The buttons use Stremio's deep link, built from each film's IMDb id, so there is
+nothing to configure and no credentials involved. On the Shield the same picks
+are already waiting: every rebuild pushes them to your MDBList list
+**"Cineprompt — Tonight"**, which the MDBList Stremio addon shows as a row.
+One-time setup on the Stremio side, if you haven't:
+
+1. In Stremio, open **Addons** and search for **MDBList**. Install it.
+2. In its configuration, paste the same MDBList API key you put in the
+   `MDBLIST_API_KEY` secret, and enable the **Cineprompt — Tonight** list.
+3. That row now updates itself on every scheduled run.
+
+If a phone button opens nothing (the app scheme isn't handled on some setups),
+set a repository **variable** (not secret) `STREMIO_WEB` to `1` under
+Settings → Secrets and variables → Actions → Variables. The buttons then use
+`web.stremio.com`, which hands off to the app where it can.
 
 If `NTFY_TOPIC` is unset the step composes the message, logs it, and sends
 nothing, so nothing breaks by leaving it off.
