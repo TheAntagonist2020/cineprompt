@@ -31,7 +31,9 @@ Env:    NTFY_TOPIC    required to actually send
         NTFY_SERVER   default https://ntfy.sh
         SITE_URL      default https://cineprompt.pages.dev
         NUDGE_MODE    evening (default) | followup
-        STREMIO_WEB   set to 1 to link web.stremio.com instead of the app scheme
+        STREMIO_APP   set to 1 to use the bare stremio:// scheme instead of
+                      web.stremio.com links (default: web, which opens anywhere
+                      and hands off to the app where it is installed)
         NUDGE_TODAY   YYYY-MM-DD, overrides today (testing)
 """
 
@@ -322,7 +324,10 @@ def main():
         data = json.load(fh)
 
     mode = (os.environ.get("NUDGE_MODE") or "evening").strip().lower()
-    web = (os.environ.get("STREMIO_WEB") or "").strip().lower() in ("1", "true", "yes")
+    truthy = lambda name: (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes")
+    # Web links by default. The bare stremio:// scheme fails outright on a phone
+    # without the app; the web link opens anywhere and hands off where it can.
+    web = truthy("STREMIO_WEB") or not truthy("STREMIO_APP")
     day = today()
 
     payload, skipped = compose(data, day, mode, web)
