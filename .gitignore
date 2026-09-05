@@ -28,3 +28,6 @@ client/public/data/
 # local wrangler dev vars (LOCAL_DEV bypass)
 .dev.vars
 .wrangler/
+
+# generated Stremio addon (built by the workflow)
+addon-dist/
