@@ -139,7 +139,9 @@ piling on, and keeps count of your streak. `Run workflow` sends the main nudge o
 demand.
 
 Times are UTC crons, so they drift an hour when clocks change; adjust the two
-evening crons in `.github/workflows/update.yml` if that bothers you.
+evening crons in `.github/workflows/update.yml` if that bothers you. The picks,
+the weekday rules and the "watched today" check use Central time regardless
+(set the `NUDGE_TZ` variable to another IANA zone to change that).
 
 ### Tap straight into Stremio
 
