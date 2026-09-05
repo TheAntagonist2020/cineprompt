@@ -31,7 +31,12 @@ Env:    NTFY_TOPIC    required to actually send
         NTFY_SERVER   default https://ntfy.sh
         SITE_URL      default https://cineprompt.pages.dev
         NUDGE_MODE    evening (default) | followup
-        STREMIO_WEB   set to 1 to link web.stremio.com instead of the app scheme
+        STREMIO_APP   set to 1 to use the bare stremio:// scheme instead of
+                      web.stremio.com links (default: web, which opens anywhere
+                      and hands off to the app where it is installed)
+        NUDGE_TZ      IANA zone for "today" and the weekday rules
+                      (default America/Chicago). The runs fire after UTC
+                      midnight, so the runner's own date is already tomorrow.
         NUDGE_TODAY   YYYY-MM-DD, overrides today (testing)
 """
 
@@ -42,7 +47,12 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
 
 SITE_URL = os.environ.get("SITE_URL") or "https://cineprompt.pages.dev"
 MAX_PICKS = 3
@@ -52,15 +62,33 @@ LONG_MIN = 150      # minutes: weekend material
 TMDB_IMG = "https://image.tmdb.org/t/p"
 IMDB_RE = re.compile(r"tt\d{5,9}")
 LIST_NAME = "Cineprompt — Tonight"   # the MDBList list that shows up as a Stremio row
+LOCAL_TZ = os.environ.get("NUDGE_TZ") or "America/Chicago"
 
 
 # ---------------------------------------------------------------- dates ----
 
-def today():
+def local_today(now=None):
+    """The user's calendar day, not the runner's.
+
+    The evening runs fire after UTC midnight, so date.today() on the runner is
+    already tomorrow in Central time. That shifts the weekday rules by a day
+    (Saturday night would get weeknight picks), adds one to the quiet count,
+    and stops "you already watched today" from ever matching.
+    """
     override = os.environ.get("NUDGE_TODAY", "").strip()
     if override:
         return date.fromisoformat(override)
-    return date.today()
+    now = now or datetime.now(timezone.utc)
+    if ZoneInfo is not None:
+        try:
+            return now.astimezone(ZoneInfo(LOCAL_TZ)).date()
+        except Exception as err:  # missing tzdata: degrade loudly, not fatally
+            print(f"nudge: could not load timezone {LOCAL_TZ!r} ({err}); using the UTC date")
+    return now.date()
+
+
+def today():
+    return local_today()
 
 
 def parse_day(value):
@@ -322,15 +350,18 @@ def main():
         data = json.load(fh)
 
     mode = (os.environ.get("NUDGE_MODE") or "evening").strip().lower()
-    web = (os.environ.get("STREMIO_WEB") or "").strip().lower() in ("1", "true", "yes")
+    truthy = lambda name: (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes")
+    # Web links by default. The bare stremio:// scheme fails outright on a phone
+    # without the app; the web link opens anywhere and hands off where it can.
+    web = truthy("STREMIO_WEB") or not truthy("STREMIO_APP")
     day = today()
 
     payload, skipped = compose(data, day, mode, web)
     if payload is None:
-        print(f"nudge [{mode}] {day:%a %Y-%m-%d}: skipped — {skipped}")
+        print(f"nudge [{mode}] {day:%a %Y-%m-%d} ({LOCAL_TZ}): skipped — {skipped}")
         return 0
 
-    print(f"nudge [{mode}] {day:%a %Y-%m-%d}\n--- {payload['title']} ---\n{payload['message']}\n")
+    print(f"nudge [{mode}] {day:%a %Y-%m-%d} ({LOCAL_TZ})\n--- {payload['title']} ---\n{payload['message']}\n")
     for action in payload["actions"]:
         print(f"  [{action['label']}] {action['url']}")
     print(f"  click: {payload['click']}")

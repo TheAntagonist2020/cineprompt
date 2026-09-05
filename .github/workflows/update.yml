@@ -211,7 +211,10 @@ jobs:
           NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
           # the 9pm run is the quiet follow-up; everything else is the main nudge
           NUDGE_MODE: ${{ github.event.schedule == '0 2 * * *' && 'followup' || 'evening' }}
-          # repo variable (Settings -> Variables): set to 1 to use web.stremio.com links
+          # Buttons use web.stremio.com links by default: they open anywhere and
+          # hand off to the app where it is installed. Repo variable STREMIO_APP=1
+          # switches to the bare stremio:// scheme (fails on a phone without the app).
+          STREMIO_APP: ${{ vars.STREMIO_APP }}
           STREMIO_WEB: ${{ vars.STREMIO_WEB }}
           PYTHONUTF8: "1"
         run: python datagen/nudge.py client/public/data.json

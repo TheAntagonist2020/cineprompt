@@ -139,12 +139,15 @@ piling on, and keeps count of your streak. `Run workflow` sends the main nudge o
 demand.
 
 Times are UTC crons, so they drift an hour when clocks change; adjust the two
-evening crons in `.github/workflows/update.yml` if that bothers you.
+evening crons in `.github/workflows/update.yml` if that bothers you. The picks,
+the weekday rules and the "watched today" check use Central time regardless
+(set the `NUDGE_TZ` variable to another IANA zone to change that).
 
 ### Tap straight into Stremio
 
-The buttons use Stremio's deep link, built from each film's IMDb id, so there is
-nothing to configure and no credentials involved. On the Shield the same picks
+The buttons link each film on web.stremio.com by its IMDb id, so there is
+nothing to configure and no credentials involved. That link opens in any
+browser and hands off to the Stremio app where it is installed. On the Shield the same picks
 are already waiting: every rebuild pushes them to your MDBList list
 **"Cineprompt — Tonight"**, which the MDBList Stremio addon shows as a row.
 One-time setup on the Stremio side, if you haven't:
@@ -154,10 +157,10 @@ One-time setup on the Stremio side, if you haven't:
    `MDBLIST_API_KEY` secret, and enable the **Cineprompt — Tonight** list.
 3. That row now updates itself on every scheduled run.
 
-If a phone button opens nothing (the app scheme isn't handled on some setups),
-set a repository **variable** (not secret) `STREMIO_WEB` to `1` under
-Settings → Secrets and variables → Actions → Variables. The buttons then use
-`web.stremio.com`, which hands off to the app where it can.
+Prefer the buttons to open the app directly? Set a repository **variable** (not
+secret) `STREMIO_APP` to `1` under Settings → Secrets and variables → Actions →
+Variables. That uses the bare `stremio://` scheme, which fails on a phone that
+doesn't have the app, so leave it off unless you know it works for you.
 
 If `NTFY_TOPIC` is unset the step composes the message, logs it, and sends
 nothing, so nothing breaks by leaving it off.
