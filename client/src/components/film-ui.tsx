@@ -586,7 +586,7 @@ export function FocusCard({
           className="w-full aspect-[2/3] group-hover:brightness-110 transition-all"
         />
         {film.tagline && (
-          <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-black/85 via-black/30 to-transparent p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)]">
+          <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-black/85 via-black/30 to-transparent p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out">
             <p className="font-serif italic text-sm leading-snug text-white/90 line-clamp-3">
               “{film.tagline}”
             </p>
