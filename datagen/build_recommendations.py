@@ -312,6 +312,7 @@ def pull_profile(base):
     return {
         "watched_ids": watched, "play_of": play_of, "last_of": last_of,
         "ty_of": ty_of, "rating_of": rating_of, "history": history,
+        "uri_of": lp.uri_of(profile), "poster_of": lp.poster_of(profile),
         "stats": tr["stats"] if tr else {}, "sources": ["letterboxd"] + (["trakt"] if tr else []),
     }
 
@@ -1090,6 +1091,16 @@ def build(base_path, out_path):
             })
     by_month = dict(sorted(by_month.items())[-12:])
     recent_watches = recent_watches[:50]
+    # Each row links to your own Letterboxd entry and carries its own poster,
+    # so a brand-new release that no pool knows about still renders, and the
+    # rating you gave it. (Watched-set enrichment already cached these films.)
+    for w in recent_watches:
+        tid = w["tmdb"]
+        w["uri"] = prof.get("uri_of", {}).get(tid)
+        fm = tmdb.movie(tid)
+        w["poster"] = (fm.get("poster") if fm else None) or prof.get("poster_of", {}).get(tid)
+        rv = prof["rating_of"].get(tid)
+        w["rating"] = round(rv / 2.0, 1) if rv else None
 
     dist = Counter(str(v) for v in prof["rating_of"].values() if v)
     movie_stats = (prof["stats"].get("movies", {})

@@ -1,5 +1,6 @@
-import { useAppData, getPosterIndex, formatNumber } from "@/lib/data";
-import { Poster } from "@/components/film-ui";
+import { useAppData, getPosterIndex, formatNumber, diaryUrl } from "@/lib/data";
+import { Poster, DiaryStars } from "@/components/film-ui";
+import { ExternalLink } from "lucide-react";
 import { LoadingScreen, PageShell } from "@/components/layout";
 import {
   ResponsiveContainer,
@@ -190,17 +191,22 @@ export default function Tracking() {
         </div>
         <ol className="divide-y divide-border border-t border-border">
           {data.recent_watches.map((w, i) => {
-            const poster = posterIdx.get(w.tmdb) ?? null;
+            const poster = w.poster ?? posterIdx.get(w.tmdb) ?? null;
+            const href = diaryUrl(data.user?.letterboxd, w);
             return (
               <li key={`${w.tmdb}-${i}`} className="py-3.5 flex items-center gap-4" data-testid={`watch-${w.tmdb}`}>
                 <span className="font-mono text-[11px] text-muted-foreground w-[88px] shrink-0 tabular-nums">
                   {w.last_watched}
                 </span>
-                <Poster path={poster} alt={w.title} className="w-9 aspect-[2/3] rounded-sm shrink-0" />
+                <a href={href} target="_blank" rel="noopener noreferrer" className="shrink-0" aria-label={`${w.title} on Letterboxd`}>
+                  <Poster path={poster} alt={w.title} className="w-9 aspect-[2/3] rounded-sm shrink-0" />
+                </a>
                 <a
-                  href={`https://letterboxd.com/tmdb/${w.tmdb}/`}
+                  href={href}
                   target="_blank"
                   rel="noopener noreferrer"
+                  title={w.uri ? "Open your diary entry on Letterboxd" : "Open your diary for this day on Letterboxd"}
+                  data-testid={`watch-diary-${w.tmdb}`}
                   className="font-serif text-lg text-foreground hover:text-primary transition-colors min-w-0 truncate"
                 >
                   {w.title}
@@ -208,11 +214,25 @@ export default function Tracking() {
                 <span className="font-mono text-[11px] text-muted-foreground ml-2 shrink-0">
                   {w.year}
                 </span>
-                {w.plays > 1 && (
-                  <span className="font-mono text-[10px] text-primary/80 border border-primary/30 rounded-sm px-1.5 py-0.5 ml-auto shrink-0">
-                    {w.plays}× plays
-                  </span>
-                )}
+                {w.rating ? (
+                  <DiaryStars rating={w.rating} label="" className="ml-3 hidden sm:flex shrink-0" />
+                ) : null}
+                <span className="ml-auto flex items-center gap-2 shrink-0">
+                  {w.plays > 1 && (
+                    <span className="font-mono text-[10px] text-primary/80 border border-primary/30 rounded-sm px-1.5 py-0.5">
+                      {w.plays}× plays
+                    </span>
+                  )}
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Open on Letterboxd"
+                    className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    Diary <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                </span>
               </li>
             );
           })}

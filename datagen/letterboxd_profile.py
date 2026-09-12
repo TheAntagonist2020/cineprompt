@@ -128,7 +128,7 @@ def _film(profile, title, year):
     return f
 
 
-def _touch(f, *, tmdb_id=None, rating=None, watched=None, uri=None, plays=None):
+def _touch(f, *, tmdb_id=None, rating=None, watched=None, uri=None, plays=None, poster=None):
     """Merge one observation into a film record. Newer dates win; a rating
     always overwrites (the latest rating is the current opinion)."""
     if tmdb_id and not f.get("tmdb_id"):
@@ -145,6 +145,8 @@ def _touch(f, *, tmdb_id=None, rating=None, watched=None, uri=None, plays=None):
         f["last_watched"] = watched[:10]
     if uri and not f.get("uri"):
         f["uri"] = uri
+    if poster and not f.get("poster"):
+        f["poster"] = poster
     if plays:
         f["plays"] = max(int(f.get("plays") or 0), int(plays))
 
@@ -180,7 +182,8 @@ def mirror_to_data(profile, data):
     never loses the diary. Kept out of the shipped shards (see
     script/data-shards.ts DEAD_KEYS)."""
     films = [[f["title"], f["year"], f.get("tmdb_id"), f.get("rating"), f.get("last_watched"),
-              f.get("plays") or 0] for f in profile["films"].values() if f.get("title")]
+              f.get("plays") or 0, f.get("uri"), f.get("poster")]
+             for f in profile["films"].values() if f.get("title")]
     diary = [[e["date"], e["title"], e["year"], e.get("tmdb_id"), e.get("rating"),
               1 if e.get("rewatch") else 0] for e in profile["diary"].values()]
     data[MIRROR_KEY] = {"version": VERSION, "films": films, "diary": diary,
@@ -192,9 +195,12 @@ def bootstrap_from_mirror(profile, data):
     if not isinstance(m, dict) or m.get("version") != VERSION:
         return 0
     n = 0
-    for title, year, tmdb_id, rating, last_watched, plays in m.get("films") or []:
+    for row in m.get("films") or []:
+        title, year, tmdb_id, rating, last_watched, plays = row[:6]
+        uri, poster = (row[6] if len(row) > 6 else None), (row[7] if len(row) > 7 else None)
         f = _film(profile, title, year)
-        _touch(f, tmdb_id=tmdb_id, rating=rating, watched=last_watched, plays=plays)
+        _touch(f, tmdb_id=tmdb_id, rating=rating, watched=last_watched, plays=plays,
+               uri=uri, poster=poster)
         n += 1
     for date, title, year, tmdb_id, rating, rewatch in m.get("diary") or []:
         _diary(profile, date, title, year, tmdb_id=tmdb_id, rating=rating, rewatch=bool(rewatch))
@@ -321,7 +327,8 @@ def ingest_rss(profile, entries):
             continue
         f = _film(profile, e["title"], e.get("year"))
         _touch(f, tmdb_id=e.get("tmdb_id"), rating=e.get("rating"),
-               watched=e.get("watched_date"), uri=e.get("uri"), plays=2 if e.get("rewatch") else 1)
+               watched=e.get("watched_date"), uri=e.get("uri"), plays=2 if e.get("rewatch") else 1,
+               poster=e.get("poster_url"))
         _diary(profile, e.get("watched_date"), e["title"], e.get("year"),
                tmdb_id=e.get("tmdb_id"), rating=e.get("rating"), rewatch=e.get("rewatch"))
         n += 1
@@ -400,6 +407,18 @@ def last_of(profile):
 def play_of(profile):
     return {f["tmdb_id"]: max(1, int(f.get("plays") or 1)) for f in profile["films"].values()
             if f.get("tmdb_id")}
+
+
+def uri_of(profile):
+    """tmdb_id -> your own Letterboxd entry page for the film."""
+    return {f["tmdb_id"]: f["uri"] for f in profile["films"].values()
+            if f.get("tmdb_id") and f.get("uri")}
+
+
+def poster_of(profile):
+    """tmdb_id -> Letterboxd poster URL (absolute), for films TMDB has no art for."""
+    return {f["tmdb_id"]: f["poster"] for f in profile["films"].values()
+            if f.get("tmdb_id") and f.get("poster")}
 
 
 def ty_of(profile):

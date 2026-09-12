@@ -275,6 +275,12 @@ export interface RecentWatch {
   tmdb: number;
   last_watched: string;
   plays: number;
+  /** your own Letterboxd entry page (letterboxd.com/<you>/film/<slug>/), when known */
+  uri?: string | null;
+  /** TMDB poster path, or an absolute Letterboxd poster URL for films TMDB lacks */
+  poster?: string | null;
+  /** the stars you gave it, 0.5–5 */
+  rating?: number | null;
 }
 
 // Background film: same shape as QueueFilm plus rewatch/ambient metadata.
@@ -643,6 +649,7 @@ export function getPosterIndex(d: AppData): Map<number, string | null> {
 // ---------- Image helpers ----------
 export function posterUrl(path: string | null | undefined, size = "w500"): string | null {
   if (!path) return null;
+  if (/^https?:\/\//.test(path)) return path; // already a full URL (Letterboxd art)
   return `https://image.tmdb.org/t/p/${size}${path}`;
 }
 export function backdropUrl(path: string | null | undefined, size = "original"): string | null {
@@ -708,6 +715,17 @@ export function tmdbUrl(tmdb_id: number | null | undefined, title?: string): str
 }
 export function letterboxdTmdbUrl(tmdb_id: number): string {
   return `https://letterboxd.com/tmdb/${tmdb_id}/`;
+}
+
+/**
+ * Your diary entry for a watch: the entry page itself when the feed gave us
+ * one, else your diary for that day (which lists the entry), else the film.
+ */
+export function diaryUrl(user: string | undefined, w: RecentWatch): string {
+  if (w.uri) return w.uri;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(w.last_watched ?? "");
+  if (user && m) return `https://letterboxd.com/${user}/films/diary/for/${m[1]}/${m[2]}/${m[3]}/`;
+  return letterboxdTmdbUrl(w.tmdb);
 }
 
 // Slug a title for a Letterboxd film URL fallback.

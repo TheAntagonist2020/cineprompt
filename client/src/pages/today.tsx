@@ -9,6 +9,7 @@ import {
   filmFromSnapshot,
   formatMonthDay,
   todayISO,
+  diaryUrl,
   type QueueFilm,
 } from "@/lib/data";
 import { TonightHero } from "@/components/tonight";
@@ -370,13 +371,14 @@ export default function Today() {
           <SectionHeading title="Recent Watches" />
           <div className="flex gap-4 overflow-x-auto hide-scrollbar pb-2 -mx-1 px-1">
             {recent.map((w) => {
-              const dir = posterIdx.get(w.tmdb) ?? null;
+              const dir = w.poster ?? posterIdx.get(w.tmdb) ?? null;
               return (
                 <a
                   key={`${w.tmdb}-${w.last_watched}`}
-                  href={`https://letterboxd.com/tmdb/${w.tmdb}/`}
+                  href={diaryUrl(data.user?.letterboxd, w)}
                   target="_blank"
                   rel="noopener noreferrer"
+                  title="Open your Letterboxd diary entry"
                   data-testid={`recent-${w.tmdb}`}
                   className="group shrink-0 w-[112px]"
                 >
@@ -390,6 +392,7 @@ export default function Today() {
                   </p>
                   <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
                     {w.last_watched}
+                    {w.rating ? <span className="text-primary/80"> · ★ {w.rating}</span> : null}
                   </p>
                 </a>
               );
