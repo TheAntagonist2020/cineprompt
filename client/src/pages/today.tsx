@@ -123,14 +123,15 @@ export default function Today() {
 
   // TONIGHT: the one decision. Your own shortlist comes first — those are the
   // films you already chose — then the slate's lead pick. "Not tonight" hides
-  // the film and the next one steps up on the spot.
+  // the film and the next one steps up on the spot. With a mood active the
+  // shortlist still leads, narrowed to the films that fit the mood.
   const idx = buildFilmIndex(data);
-  const shortlisted: QueueFilm[] = moodActive
-    ? []
-    : fs
-        .shortlistFilms()
-        .map(({ tmdb_id, film }) => idx.get(tmdb_id) ?? (film ? filmFromSnapshot(tmdb_id, film) : null))
-        .filter((f): f is QueueFilm => !!f && !fs.isHidden(f.tmdb_id));
+  const moodIds = moodActive ? new Set(moodPicks(data, activeMoods).map((f) => f.tmdb_id)) : null;
+  const shortlisted: QueueFilm[] = fs
+    .shortlistFilms()
+    .map(({ tmdb_id, film }) => idx.get(tmdb_id) ?? (film ? filmFromSnapshot(tmdb_id, film) : null))
+    .filter((f): f is QueueFilm => !!f && !fs.isHidden(f.tmdb_id))
+    .filter((f) => !moodIds || moodIds.has(f.tmdb_id));
   let tonightSource: "shortlist" | "slate" | "mood" = moodActive ? "mood" : "slate";
   let tonight: QueueFilm | null = null;
   if (shortlisted.length) {

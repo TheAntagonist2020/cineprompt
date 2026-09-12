@@ -135,8 +135,9 @@ def apply(d, rows, today=None):
         d["slates"] = [{**s, "focus": keep(s.get("focus", []))} for s in d["slates"]]
     if d.get("todays_pick") and d["todays_pick"].get("tmdb_id") in hide:
         pool = (d.get("slates") or [{}])[0].get("focus") or d.get("queue") or []
-        if pool:
-            d["todays_pick"] = pool[0]
+        # no replacement is still better than a pick you said no to: the
+        # nudge reads this field without consulting state
+        d["todays_pick"] = pool[0] if pool else None
 
     if watched:
         seen = set(d.get("watched_tmdb_set") or []) | watched

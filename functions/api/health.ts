@@ -1,7 +1,7 @@
 // /api/health — is the backend actually wired up? The client shows this in the
 // sidebar so a broken binding is visible instead of silently hiding features.
 //   GET -> { ok, db: "ready" | "missing" | "error", rows, email, error? }
-import { ensureSchema } from "./state";
+import { ensureSchema, liveRowCount } from "./state";
 
 export const onRequestGet = async (context: any) => {
   const { env, data } = context;
@@ -9,9 +9,8 @@ export const onRequestGet = async (context: any) => {
   if (env?.DB) {
     try {
       await ensureSchema(env.DB);
-      const row: any = await env.DB.prepare("SELECT COUNT(*) AS n FROM film_state").first();
       out.db = "ready";
-      out.rows = Number(row?.n ?? 0);
+      out.rows = await liveRowCount(env.DB);
     } catch (err: any) {
       out.db = "error";
       out.error = String(err?.message ?? err).slice(0, 200);

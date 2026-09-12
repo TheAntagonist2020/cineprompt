@@ -128,13 +128,16 @@ def _film(profile, title, year):
     return f
 
 
-def _touch(f, *, tmdb_id=None, rating=None, watched=None, uri=None, plays=None, poster=None):
+def _touch(f, *, tmdb_id=None, rating=None, watched=None, uri=None, plays=None, poster=None,
+           rating_wins=True):
     """Merge one observation into a film record. Newer dates win; a rating
-    always overwrites (the latest rating is the current opinion)."""
+    overwrites by default (the source being folded in is the current opinion),
+    unless the caller knows its source is older (`rating_wins=False`), in
+    which case it only fills a gap."""
     if tmdb_id and not f.get("tmdb_id"):
         f["tmdb_id"] = int(tmdb_id)
         f.pop("resolve_tried", None)
-    if rating is not None:
+    if rating is not None and (rating_wins or not f.get("rating")):
         try:
             r = float(rating)
             if 0 < r <= 5:
@@ -191,16 +194,20 @@ def mirror_to_data(profile, data):
 
 
 def bootstrap_from_mirror(profile, data):
+    """Merge the mirror data.json carries. Additive for everything except
+    ratings, where the newer of the two copies wins: a mirror older than the
+    profile only fills ratings the profile lacks."""
     m = data.get(MIRROR_KEY) or {}
     if not isinstance(m, dict) or m.get("version") != VERSION:
         return 0
+    mirror_newer = (m.get("updated_at") or "") > (profile.get("updated_at") or "")
     n = 0
     for row in m.get("films") or []:
         title, year, tmdb_id, rating, last_watched, plays = row[:6]
         uri, poster = (row[6] if len(row) > 6 else None), (row[7] if len(row) > 7 else None)
         f = _film(profile, title, year)
         _touch(f, tmdb_id=tmdb_id, rating=rating, watched=last_watched, plays=plays,
-               uri=uri, poster=poster)
+               uri=uri, poster=poster, rating_wins=mirror_newer)
         n += 1
     for date, title, year, tmdb_id, rating, rewatch in m.get("diary") or []:
         _diary(profile, date, title, year, tmdb_id=tmdb_id, rating=rating, rewatch=bool(rewatch))
@@ -299,12 +306,8 @@ def ingest_export(profile, src):
             _touch(_film(profile, name, year), uri=_col(r, "Letterboxd URI"),
                    watched=_col(r, "Date"))
             n += 1
-    for r in csvs.get("ratings", []):
-        name, year = _col(r, "Name"), _col(r, "Year")
-        if name:
-            _touch(_film(profile, name, year), rating=_col(r, "Rating"),
-                   uri=_col(r, "Letterboxd URI"))
-            n += 1
+    # diary first (historical ratings per viewing), ratings.csv last: it holds
+    # the *current* rating and must be what the profile ends up with
     for r in csvs.get("diary", []):
         name, year = _col(r, "Name"), _col(r, "Year")
         if not name:
@@ -316,6 +319,12 @@ def ingest_export(profile, src):
         f["plays"] = max(int(f.get("plays") or 0), 1)
         _diary(profile, wd, name, year, rating=_col(r, "Rating"), rewatch=rewatch)
         n += 1
+    for r in csvs.get("ratings", []):
+        name, year = _col(r, "Name"), _col(r, "Year")
+        if name:
+            _touch(_film(profile, name, year), rating=_col(r, "Rating"),
+                   uri=_col(r, "Letterboxd URI"))
+            n += 1
     return n
 
 

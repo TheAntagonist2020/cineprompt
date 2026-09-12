@@ -2,14 +2,17 @@
 //
 //   GET  -> { films: [{ tmdb_id, status, snooze_until, notes, rating, updated_at,
 //                       title, year, poster, imdb_id, directors, runtime, reasons }] }
+//           (rows with live state only; cleared rows stay as tombstones, see below)
 //   POST -> body { tmdb_id, status?, snooze_until?, notes?, rating?, film?, updated_at? }
-//           (partial upsert; `film` is a snapshot {title, year, poster, imdb_id,
-//           directors[], runtime, reasons[]} so a shortlisted film survives the
-//           twice-daily rebuild that may drop it from every pool; `updated_at`
-//           is the client's write time in ms — a write older than the stored
-//           row is refused with 409 and the current row, so a phone that was
-//           offline cannot overwrite a newer choice made on the TV. A write
-//           that leaves no state at all (every field null) deletes the row.)
+//
+// Concurrency model, in one paragraph: `updated_at` is the client's write time
+// in milliseconds and is the row's revision. The upsert is conditional on
+// `excluded.updated_at >= film_state.updated_at`, so a stale write (a phone
+// reconnecting after a night offline, or two taps whose requests land out of
+// order) changes nothing and gets 409 with the current row, which the client
+// adopts. A write that leaves no state at all (every field null) does not
+// delete the row: it keeps it as a tombstone with that revision, so an even
+// older write cannot resurrect the cleared choice. GET filters tombstones out.
 //
 // The schema is applied here, on first use, rather than by a deploy step: the
 // original schema.sql was never run against the production database, which is
@@ -25,6 +28,9 @@ const COLUMNS: Array<[string, string]> = [
   ["runtime", "INTEGER"],
   ["reasons", "TEXT"], // JSON array
 ];
+
+// A row that still says something. Everything else is a tombstone.
+const LIVE = "(status IS NOT NULL OR snooze_until IS NOT NULL OR notes IS NOT NULL OR rating IS NOT NULL)";
 
 let schemaReady: Promise<void> | null = null;
 
@@ -60,6 +66,11 @@ export async function ensureSchema(db: any): Promise<void> {
   return schemaReady;
 }
 
+export async function liveRowCount(db: any): Promise<number> {
+  const row: any = await db.prepare(`SELECT COUNT(*) AS n FROM film_state WHERE ${LIVE}`).first();
+  return Number(row?.n ?? 0);
+}
+
 function noDb(env: any): Response | null {
   if (env?.DB) return null;
   return new Response(
@@ -78,6 +89,23 @@ function parseJsonArray(v: unknown): string[] | null {
   }
 }
 
+// Revisions are milliseconds. A value that small can only be seconds (rows
+// written before this precision existed); lift it so comparisons stay sane.
+function asMillis(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e11 ? n * 1000 : n;
+}
+
+function rowOut(r: any) {
+  return {
+    ...r,
+    updated_at: asMillis(r.updated_at),
+    directors: parseJsonArray(r.directors),
+    reasons: parseJsonArray(r.reasons),
+  };
+}
+
 export const onRequestGet = async (context: any) => {
   const missing = noDb(context.env);
   if (missing) return missing;
@@ -85,10 +113,9 @@ export const onRequestGet = async (context: any) => {
   const { results } = await context.env.DB.prepare(
     `SELECT tmdb_id, status, snooze_until, notes, rating, updated_at,
             title, year, poster, imdb_id, directors, runtime, reasons
-       FROM film_state`,
+       FROM film_state WHERE ${LIVE}`,
   ).all();
-  const films = (results ?? []).map(rowOut);
-  return Response.json({ films });
+  return Response.json({ films: (results ?? []).map(rowOut) });
 };
 
 export const onRequestPost = async (context: any) => {
@@ -102,39 +129,20 @@ export const onRequestPost = async (context: any) => {
   }
   const id = Number(body?.tmdb_id);
   if (!Number.isInteger(id) || id <= 0) return badRequest("tmdb_id must be a positive integer");
-  await ensureSchema(context.env.DB);
+  const db = context.env.DB;
+  await ensureSchema(db);
+
+  const incoming = asMillis(body.updated_at) || Date.now();
 
   // Merge: a field present in the body overrides; otherwise keep the stored
   // value. `'key' in body` lets the client clear a field by sending null.
-  const cur: any = await context.env.DB
-    .prepare("SELECT * FROM film_state WHERE tmdb_id = ?")
-    .bind(id)
-    .first();
-  // Newest write wins, on the client's clock (the same clock the client uses
-  // to order its own writes). No timestamp means "now".
-  const incomingMs = Number(body.updated_at);
-  const incoming = Number.isFinite(incomingMs) && incomingMs > 0
-    ? Math.floor(incomingMs / 1000)
-    : Math.floor(Date.now() / 1000);
-  if (cur && Number(cur.updated_at) > incoming) {
-    return new Response(JSON.stringify({ stale: true, film: rowOut(cur) }), {
-      status: 409,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
+  // (The read is advisory; the write below is what decides who wins.)
+  const cur: any = await db.prepare("SELECT * FROM film_state WHERE tmdb_id = ?").bind(id).first();
   const pick = (k: string) => (k in body ? body[k] : cur ? cur[k] : null);
   const status = pick("status") ?? null;
   const snooze_until = pick("snooze_until") ?? null;
   const notes = pick("notes") ?? null;
   const rating = pick("rating") ?? null;
-
-  // Nothing left to remember: drop the row rather than keep a null husk
-  // that would resurface on every reconciliation.
-  if (status == null && snooze_until == null && notes == null && rating == null) {
-    await context.env.DB.prepare("DELETE FROM film_state WHERE tmdb_id = ?").bind(id).run();
-    return Response.json({ ok: true, deleted: true, updated_at: incoming });
-  }
 
   // The snapshot only ever fills in — a later write without `film` keeps it.
   const film = body.film && typeof body.film === "object" ? body.film : null;
@@ -147,25 +155,37 @@ export const onRequestPost = async (context: any) => {
   const directors = film && Array.isArray(film.directors) ? JSON.stringify(film.directors) : cur?.directors ?? null;
   const reasons = film && Array.isArray(film.reasons) ? JSON.stringify(film.reasons.slice(0, 4)) : cur?.reasons ?? null;
 
-  await context.env.DB.prepare(
-    `INSERT INTO film_state (tmdb_id, status, snooze_until, notes, rating, updated_at,
-                             title, year, poster, imdb_id, directors, runtime, reasons)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?13, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-     ON CONFLICT(tmdb_id) DO UPDATE SET
-       status = ?2, snooze_until = ?3, notes = ?4, rating = ?5, updated_at = ?13,
-       title = ?6, year = ?7, poster = ?8, imdb_id = ?9, directors = ?10, runtime = ?11, reasons = ?12`,
-  )
+  // Conditional upsert: the row only changes if this write is at least as new
+  // as what is stored. `changes` tells us whether it did.
+  const res = await db
+    .prepare(
+      `INSERT INTO film_state (tmdb_id, status, snooze_until, notes, rating, updated_at,
+                               title, year, poster, imdb_id, directors, runtime, reasons)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?13, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+       ON CONFLICT(tmdb_id) DO UPDATE SET
+         status = excluded.status, snooze_until = excluded.snooze_until,
+         notes = excluded.notes, rating = excluded.rating, updated_at = excluded.updated_at,
+         title = excluded.title, year = excluded.year, poster = excluded.poster,
+         imdb_id = excluded.imdb_id, directors = excluded.directors,
+         runtime = excluded.runtime, reasons = excluded.reasons
+       WHERE excluded.updated_at >= film_state.updated_at`,
+    )
     .bind(id, status, snooze_until, notes, rating,
           title, year == null ? null : String(year), poster, imdb_id, directors,
           runtime == null ? null : Number(runtime), reasons, incoming)
     .run();
 
-  return Response.json({ ok: true, updated_at: incoming });
+  if (!res?.meta || Number(res.meta.changes) === 0) {
+    // Lost to a newer revision: hand it back so the client can adopt it.
+    const now: any = await db.prepare("SELECT * FROM film_state WHERE tmdb_id = ?").bind(id).first();
+    return new Response(JSON.stringify({ stale: true, film: now ? rowOut(now) : null }), {
+      status: 409,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  const cleared = status == null && snooze_until == null && notes == null && rating == null;
+  return Response.json({ ok: true, deleted: cleared, updated_at: incoming });
 };
-
-function rowOut(r: any) {
-  return { ...r, directors: parseJsonArray(r.directors), reasons: parseJsonArray(r.reasons) };
-}
 
 function badRequest(msg: string) {
   return new Response(JSON.stringify({ error: msg }), {
