@@ -1,7 +1,8 @@
 name: Update & Deploy Cineprompt
 
 # Keeps the live site current with what you've watched, with no manual steps:
-#   - on a schedule: re-pull Trakt -> rebuild the unseen-picks engine -> deploy
+#   - on a schedule: fold in the Letterboxd diary -> rebuild the unseen-picks
+#     engine (Trakt layered on top if configured) -> apply in-app choices -> deploy
 #   - on manual "Run workflow": same (force a refresh on demand)
 #   - on push to main: redeploy code changes (no API rebuild)
 on:
@@ -73,6 +74,19 @@ jobs:
           restore-keys: |
             data-json-${{ runner.os }}-
 
+      # The accumulated Letterboxd profile (seen set, ratings, dated diary) —
+      # the source of truth for taste and for "seen". Same rotating-key
+      # pattern. Losing it is not fatal (it re-bootstraps from data.json and
+      # re-resolves against the TMDB cache) but it would forget diary entries
+      # older than the RSS window, so it is kept.
+      - name: Restore Letterboxd profile
+        uses: actions/cache@v6
+        with:
+          path: datagen/.letterboxd_profile.json
+          key: letterboxd-profile-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            letterboxd-profile-${{ runner.os }}-
+
       # The restore overwrites the checked-out file even when the commit is
       # newer (a fresh data.json committed by hand). Keep whichever is fresher.
       - name: Keep the fresher data.json
@@ -105,7 +119,23 @@ jobs:
       - name: Install JS deps
         run: npm ci
 
-      # Rebuild recommendations from your live Trakt history.
+      # Letterboxd first. Folds the public RSS diary (50 newest entries, TMDB
+      # ids included) into the accumulated profile and resolves any title
+      # still missing a TMDB id through the cached TMDB search. Runs before
+      # the rebuild so the engine's "seen" set is complete on this run, not
+      # the next. Non-fatal: a feed hiccup must never block the deploy.
+      - name: Update the Letterboxd profile (RSS + TMDB ids)
+        id: profile
+        if: github.event_name != 'push'
+        continue-on-error: true
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          LETTERBOXD_USER: ${{ secrets.LETTERBOXD_USER }}
+          PYTHONUTF8: "1"
+        run: python datagen/letterboxd_profile.py client/public/data.json
+
+      # Rebuild recommendations from the Letterboxd profile, with Trakt
+      # layered on top when its secrets are present (it is optional now).
       # Skipped on plain code pushes (those just redeploy the committed data).
       - name: Rebuild recommendation data
         if: github.event_name != 'push'
@@ -138,6 +168,26 @@ jobs:
           MDBLIST_API_KEY: ${{ secrets.MDBLIST_API_KEY }}
           PYTHONUTF8: "1"
         run: python datagen/build_lists.py
+
+      # Honour what you decided in the app. Reads film_state from D1 and
+      # prunes dismissed / watched / not-tonight films from every pool before
+      # the Stremio row and the nudge are built, and puts your shortlist first
+      # in both. Needs CLOUDFLARE_API_TOKEN to carry "D1: Edit" as well as
+      # "Pages: Edit" (see DEPLOY.md); until it does, this step reports and
+      # the pipeline carries on with the app filtering client-side.
+      - name: Apply in-app choices (shortlist / not tonight / watched)
+        id: state
+        if: github.event_name != 'push'
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PYTHONUTF8: "1"
+        run: |
+          npx wrangler@4 d1 execute cineprompt-db --remote --json \
+            --command "SELECT tmdb_id, status, snooze_until, rating, updated_at, title, year, poster, imdb_id, directors, runtime, reasons FROM film_state" \
+            > state.json
+          python datagen/apply_state.py client/public/data.json state.json
 
       # Push the current picks to the "Cineprompt — Tonight" MDBList list, which
       # surfaces in Stremio. Non-fatal: a MDBList hiccup must not block the deploy.
@@ -227,7 +277,9 @@ jobs:
             echo
             echo "| Step | Outcome |"
             echo "| --- | --- |"
+            echo "| Letterboxd profile (RSS + TMDB ids) | ${{ steps.profile.outcome || 'skipped' }} |"
             echo "| Letterboxd diary (RSS) | ${{ steps.letterboxd.outcome || 'skipped' }} |"
+            echo "| In-app choices (D1) | ${{ steps.state.outcome || 'skipped' }} |"
             echo "| Canon from MDBList | ${{ steps.canon.outcome || 'skipped' }} |"
             echo "| Picks to MDBList (Stremio) | ${{ steps.mdblist.outcome || 'skipped' }} |"
             echo "| Phone nudge | ${{ steps.nudge.outcome || 'skipped' }} |"
@@ -238,7 +290,7 @@ jobs:
             echo "\`generated_at\` in the deployed payload:"
             echo
             echo '```'
-            python -c "import json;print(json.load(open('client/public/data.json')).get('generated_at','(missing)'))"
+            python -c "import json;d=json.load(open('client/public/data.json'));print(d.get('generated_at','(missing)'));t=d.get('taste') or {};print('taste:',t.get('sources'),'watches in window:',t.get('watches'),'decades:',dict(list((t.get('decades') or {}).items())[:4]))"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

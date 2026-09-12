@@ -8,7 +8,7 @@ it runs itself — but it's here for peace of mind.
 A private film dashboard at **https://cineprompt.pages.dev** that:
 - shows unseen films worth watching (canon, your favorite directors, your blind spots)
   plus a few comfort rewatches for background,
-- **updates itself twice a day** from your Trakt history,
+- **updates itself twice a day** from your Letterboxd diary (Trakt too, if configured),
 - is locked so only **daltino1@gmail.com** can open it.
 
 ## Where everything lives (so nothing can be "lost")
@@ -17,7 +17,8 @@ A private film dashboard at **https://cineprompt.pages.dev** that:
 | --- | --- | --- |
 | All the code + data | GitHub repo `TheAntagonist2020/cineprompt` (private) | the master copy, in the cloud |
 | The live site | Cloudflare Pages project `cineprompt` | served globally |
-| Your watch data | regenerates from **Trakt** every run | reproducible — not a single fragile file |
+| Your watch data | the Letterboxd profile, kept in the Actions cache **and** mirrored into `data.json` | if both caches ever expire (the workflow stops running for a week), drop a Letterboxd export ZIP in once — see README |
+| Your in-app choices | Cloudflare D1 database `cineprompt-db` | plus a copy in each browser you used |
 
 If your computer died, nothing here is lost — it's all in GitHub + Cloudflare.
 
@@ -25,9 +26,10 @@ If your computer died, nothing here is lost — it's all in GitHub + Cloudflare.
 
 1. The **GitHub repo** `TheAntagonist2020/cineprompt`.
 2. The **Cloudflare Pages project** `cineprompt`.
-3. The **Cloudflare API token with "Pages" permission** — GitHub Actions uses it to
-   deploy (stored as the `CLOUDFLARE_API_TOKEN` secret). The *other* token
+3. The **Cloudflare API token with "Pages" (+ "D1") permission** — GitHub Actions uses it to
+   deploy and to read your in-app choices (stored as the `CLOUDFLARE_API_TOKEN` secret). The *other* token
    ("cinema-access", for the login lock) can be deleted after setup; this one can't.
+4. The **D1 database `cineprompt-db`** — your shortlist and every "not tonight" / "watched".
 
 ## How to open it
 
@@ -41,7 +43,8 @@ If your computer died, nothing here is lost — it's all in GitHub + Cloudflare.
    - Cloudflare token expired → make a new one (Cloudflare → My Profile → API Tokens →
      Create Token → *Cloudflare Pages: Edit*) and update the secret:
      repo **Settings → Secrets and variables → Actions → `CLOUDFLARE_API_TOKEN`**.
-   - Trakt/TMDB key changed → update `TRAKT_CLIENT_ID` / `TMDB_API_KEY` the same way.
+   - TMDB key changed → update `TMDB_API_KEY` the same way. Trakt is optional: a dead
+     Trakt key only costs scrobbled plays, never the site.
 3. Re-run it: Actions tab → the workflow → **Run workflow**. The live site keeps showing
    the last good version until a run succeeds, so a failure never takes the site down.
 

@@ -5,9 +5,13 @@ import { CalendarDays, ListVideo, Compass, Users, Tv, Activity, RefreshCw, Dices
 import {
   useAppData,
   getPosterIndex,
+  buildFilmIndex,
+  filmFromSnapshot,
   formatMonthDay,
   todayISO,
+  type QueueFilm,
 } from "@/lib/data";
+import { TonightHero } from "@/components/tonight";
 import {
   Poster,
   FocusCard,
@@ -116,6 +120,40 @@ export default function Today() {
   }
   background = background.filter((f) => !fs.isHidden(f.tmdb_id));
 
+  // TONIGHT: the one decision. Your own shortlist comes first — those are the
+  // films you already chose — then the slate's lead pick. "Not tonight" hides
+  // the film and the next one steps up on the spot.
+  const idx = buildFilmIndex(data);
+  const shortlisted: QueueFilm[] = moodActive
+    ? []
+    : fs
+        .shortlistFilms()
+        .map(({ tmdb_id, film }) => idx.get(tmdb_id) ?? (film ? filmFromSnapshot(tmdb_id, film) : null))
+        .filter((f): f is QueueFilm => !!f && !fs.isHidden(f.tmdb_id));
+  let tonightSource: "shortlist" | "slate" | "mood" = moodActive ? "mood" : "slate";
+  let tonight: QueueFilm | null = null;
+  if (shortlisted.length) {
+    tonight = shortlisted[0];
+    tonightSource = "shortlist";
+  } else if (focus.length) {
+    tonight = focus[0];
+  }
+  if (tonight) {
+    const tid = tonight.tmdb_id;
+    focus = focus.filter((f) => f.tmdb_id !== tid);
+    background = background.filter((f) => f.tmdb_id !== tid);
+  }
+  const nextUp: QueueFilm | null =
+    (tonightSource === "shortlist" && shortlisted[1]) || focus[0] || null;
+
+  const taste = data.taste;
+  const tasteLine = taste && taste.watches > 0
+    ? [
+        ...Object.entries(taste.decades).slice(0, 3).map(([d, s]) => `${d}s ${Math.round(s * 100)}%`),
+        ...Object.entries(taste.genres).slice(0, 2).map(([g, s]) => `${g.toLowerCase()} ${Math.round(s * 100)}%`),
+      ].join(" · ")
+    : "";
+
   function reroll() {
     setShuffleSeed((s) => s + 1);
     setSpinning(true);
@@ -184,20 +222,38 @@ export default function Today() {
           )}
           <p className="text-muted-foreground mt-4 max-w-xl leading-relaxed text-[15px] sm:text-base">
             {moodActive
-              ? `Tuned to your ${moodLabel} mood — 3 picks to focus on, 2 to keep on in the background.`
-              : "3 picks to sharpen the craft. 2 to keep on in the background."}
+              ? `Tuned to your ${moodLabel} mood — one to put on, two more to focus on, two for the background.`
+              : "One to put on. Two more if it isn't that. Two to keep on in the background."}
           </p>
+          {!moodActive && tasteLine && (
+            <p
+              className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/60 mt-3"
+              data-testid="taste-line"
+              title="What the queue is tuned to: the decades and genres of your own recent logging."
+            >
+              Tuned to your last {Math.round((taste!.window_days || 540) / 30)} months · {tasteLine}
+            </p>
+          )}
         </header>
+
+        {tonight && (
+          <TonightHero
+            film={tonight}
+            next={nextUp}
+            source={tonightSource}
+            onOpen={() => modal.open(tonight!)}
+          />
+        )}
 
         {/* FOCUS */}
         <section className="mb-14" key={`focus-${moodKey}`} >
           <div className="animate-in fade-in duration-200">
           <SlateSectionHeading
-            kicker="Focus"
-            title={moodActive ? `${moodLabel} focus` : "Sharpen the craft"}
+            kicker="Or"
+            title={moodActive ? `${moodLabel} focus` : "If not that, one of these"}
             count={focus.length}
           />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 sm:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
             {focus.map((f) => (
               <FocusCard
                 key={f.tmdb_id}

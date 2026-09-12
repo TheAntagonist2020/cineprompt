@@ -126,16 +126,18 @@ def film_key(film):
 
 
 def candidate_pool(data):
-    """Today's curated pick plus the top of the queue, deduplicated, in order."""
+    """Your shortlist first (films you already chose, in the app), then
+    today's curated pick, then the top of the queue — deduplicated, in order."""
     pool, seen = [], set()
-    for film in [data.get("todays_pick")] + list((data.get("queue") or [])[:POOL_SIZE]):
+    shortlist = list(data.get("shortlist") or [])
+    for film in shortlist + [data.get("todays_pick")] + list((data.get("queue") or [])[:POOL_SIZE]):
         if not isinstance(film, dict) or not film.get("title"):
             continue
         key = film_key(film)
         if key in seen:
             continue
         seen.add(key)
-        pool.append(film)
+        pool.append({**film, "_shortlisted": film in shortlist})
     return pool
 
 
@@ -147,12 +149,16 @@ def daily_shuffle(pool, day):
 
 
 def pick_films(pool, day, mode):
-    shuffled = daily_shuffle(pool, day)
+    # The shortlist is a decision already made: it is never shuffled away.
+    # Everything after it rotates daily as before.
+    lead = [f for f in pool if f.get("_shortlisted")]
+    shuffled = lead + daily_shuffle([f for f in pool if not f.get("_shortlisted")], day)
     short = [f for f in shuffled if minutes(f) and minutes(f) <= SHORT_MAX]
     long_ = [f for f in shuffled if minutes(f) and minutes(f) >= LONG_MIN]
 
     if mode == "followup":
-        return (short or shuffled)[:1]
+        easy_lead = [f for f in lead if minutes(f) and minutes(f) <= SHORT_MAX]
+        return (easy_lead or short or shuffled)[:1]
 
     picks = []
 
@@ -163,6 +169,7 @@ def pick_films(pool, day, mode):
             if film not in picks:
                 picks.append(film)
 
+    take(lead, MAX_PICKS)                                # your shortlist leads, whatever the night
     if is_weekend(day):
         take(long_, 1)                                   # room for the epic
         take(shuffled, MAX_PICKS)
