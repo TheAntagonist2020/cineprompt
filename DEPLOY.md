@@ -3,9 +3,10 @@
 Cineprompt deploys to **Cloudflare Pages** and keeps itself current automatically
 via a **GitHub Actions** pipeline ([.github/workflows/update.yml](.github/workflows/update.yml)):
 
-- **Twice a day** (and on demand) it re-pulls your Trakt history, rebuilds the
-  unseen-recommendation engine, and redeploys — so the live site always reflects
-  what you've watched, with zero manual steps.
+- **Twice a day** (and on demand) it folds in your Letterboxd diary, rebuilds
+  the unseen-recommendation engine (Trakt layered on top if configured), applies
+  the choices you made in the app, and redeploys — so the live site always
+  reflects what you've watched, with zero manual steps.
 - **On push to `main`** it redeploys code changes (no API rebuild).
 
 Most of the setup is already done in the repo. What's left needs *your* Cloudflare
@@ -13,21 +14,25 @@ account (I can't create cloud credentials for you).
 
 ## What you need to provide
 
-Five GitHub Actions **secrets**. Three are your existing API keys (already loadable
-from `datagen/.env`); two are new Cloudflare values:
+GitHub Actions **secrets**:
 
-| Secret | What it is |
-| --- | --- |
-| `TMDB_API_KEY` | your TMDB v3 key (from `datagen/.env`) |
-| `TRAKT_CLIENT_ID` | your Trakt app client id (from `datagen/.env`) |
-| `TRAKT_USER` | your Trakt username |
-| `CLOUDFLARE_API_TOKEN` | **new** — created below |
-| `CLOUDFLARE_ACCOUNT_ID` | **new** — copied below |
+| Secret | Required? | What it is |
+| --- | --- | --- |
+| `TMDB_API_KEY` | yes | your TMDB v3 key (from `datagen/.env`) |
+| `LETTERBOXD_USER` | recommended | your Letterboxd handle (falls back to the one in `data.json`) |
+| `CLOUDFLARE_API_TOKEN` | yes | created below — **Pages: Edit**, plus **D1: Edit** for the in-app-choices step |
+| `CLOUDFLARE_ACCOUNT_ID` | yes | copied below |
+| `TRAKT_CLIENT_ID` | optional | your Trakt app client id — adds scrobbled plays; nothing depends on it |
+| `TRAKT_USER` | optional | your Trakt username |
+| `MDBLIST_API_KEY` | optional | your MDBList key — the canon checklists and the Stremio row |
+| `NTFY_TOPIC` | optional | the phone nudge (below) |
 
 ### 1. Create the Cloudflare API token
 
 1. Cloudflare dashboard → **My Profile → API Tokens → Create Token → Create Custom Token**.
-2. Permission: **Account → Cloudflare Pages → Edit** (that single permission is enough).
+2. Permissions: **Account → Cloudflare Pages → Edit** (deploys) and
+   **Account → D1 → Edit** (lets the pipeline read the choices you make in the
+   app — see below; without it that one step reports and is skipped).
 3. Account Resources: include the account that will own the project.
 4. Create, and copy the token (shown once).
 
@@ -113,6 +118,7 @@ Access cookie, so the session sticks around instead of being cleared with your t
 The site waits for you to visit it, which is how you end up not watching
 anything for a month. The evening run also pushes the picks to your phone, so
 the message itself is enough to decide on — you never have to open the site.
+If you have shortlisted anything in the app, those films lead the message.
 
 Uses [ntfy](https://ntfy.sh): free, no account, no signup.
 
@@ -168,6 +174,31 @@ nothing, so nothing breaks by leaving it off.
 scheduled run pushes a high-priority alert instead of failing silently — which
 is the difference between fixing a dead Trakt token today and discovering it
 six weeks from now.
+
+## Let the pipeline see your in-app choices
+
+Shortlist, Not tonight and Watched are saved in the browser first and mirrored to
+the D1 database `cineprompt-db` (the Pages Function creates its own table on
+first use, so there is nothing to migrate by hand). The workflow's **Apply
+in-app choices** step reads that table with `wrangler d1 execute` and folds it
+into the picks before the Stremio row and the phone nudge are built: dismissed
+and watched films leave every pool, "not tonight" holds a film out of the slate
+until tomorrow, and your shortlist leads the nudge and the Stremio row.
+
+"Not tonight" dates are compared on your calendar day (`America/Chicago`; set a
+`USER_TZ` repository variable to change it), not the runner's UTC clock.
+
+That step needs the same `CLOUDFLARE_API_TOKEN` to carry **Account → D1 → Edit**
+in addition to Pages: Edit. Edit the existing token (Cloudflare → My Profile →
+API Tokens → the token → Edit → add the permission → Continue to summary →
+Update token); the secret value does not change. Until then the step shows as
+`failure` in the run summary and the app keeps filtering client-side.
+
+**Is the backend wired up?** Open `https://cineprompt.pages.dev/api/health`
+while logged in. `db: "ready"` with a row count means choices are reaching the
+cloud; the sidebar also says "Choices synced across devices" or "Choices saved
+on this device only". Either way a tap is never lost — a local-only choice is
+pushed up the next time the API answers.
 
 ## Enable the in-app "Sync now" button
 

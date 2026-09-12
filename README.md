@@ -1,8 +1,10 @@
 # Cineprompt
 
-A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd.com/daltonjohnson/) · [lunarafilm.com](https://lunarafilm.com)). It turns a Letterboxd + Trakt + TMDB viewing history (4,500+ films) into a daily "what to watch" cockpit: a rotating daily slate, a scored recommendation queue, blind-spot analysis, director completion targets, canon checklists, screenplay reading lists, craft (cinematographer/composer) tracking, themed weeks, a tag explorer, and a mood-based picker.
+A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd.com/daltonjohnson/) · [lunarafilm.com](https://lunarafilm.com)). It turns a Letterboxd (+ optional Trakt) + TMDB viewing history (4,500+ films) into a daily "what to watch" instruction: **one pick for tonight** with a play button, a rotating daily slate behind it, a scored recommendation queue tuned to what you have actually been watching lately, blind-spot analysis, director completion targets, canon checklists, screenplay reading lists, craft (cinematographer/composer) tracking, themed weeks, a tag explorer, and a mood-based picker.
 
-The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. The Express server only serves the built client — there is no database or API at runtime.
+Your choices in the app — **Shortlist**, **Not tonight**, **Watched** — are saved on the device first and mirrored to a Cloudflare D1 store, so they survive a reload, a rebuild, and a switch from phone to TV. The pipeline reads them back (see [DEPLOY.md](DEPLOY.md#let-the-pipeline-see-your-in-app-choices)) so the phone nudge and the Stremio row agree with the app.
+
+The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and three small Pages Functions (`/api/state`, `/api/health`, `/api/sync`, in `functions/api/`) provide the only runtime backend: a D1 table for your choices and a trigger for the rebuild workflow. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
 
 Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library — every film in every filmography, collection, and canon list, plus directors and collections by name.
 
@@ -10,7 +12,7 @@ Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library —
 
 - **Client:** React 18, Vite 7, TypeScript, wouter (hash routing), Tailwind + shadcn/ui, framer-motion, Recharts
 - **Server:** Express 5 (static file serving + Vite middleware in dev)
-- **Data pipeline:** Python 3 (`datagen/`) pulling from TMDB, Trakt, and a Letterboxd export
+- **Data pipeline:** Python 3 (`datagen/`) pulling from Letterboxd (public RSS + export), TMDB, and optionally Trakt
 
 ## Prerequisites
 
@@ -36,11 +38,37 @@ npm start          # serves the build on PORT (default 5000)
 ## Data
 
 The client reads `client/public/data.json`. Credentials live in `datagen/.env`
-(git-ignored — copy `datagen/.env.example` and fill in your keys):
-`TMDB_API_KEY`, `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET`, `TRAKT_USER`,
-`LETTERBOXD_USER`.
+(git-ignored — copy `datagen/.env.example` and fill in your keys). Required:
+`TMDB_API_KEY`. Recommended: `LETTERBOXD_USER` (falls back to `user.letterboxd`
+in `data.json`). Optional: `TRAKT_CLIENT_ID` / `TRAKT_USER` (adds scrobbled
+plays and a rating fallback; nothing depends on it).
 
-Three levels of refresh, lightest to heaviest:
+### Letterboxd is the source of truth
+
+The engine's idea of what you've **seen** and what you **like** comes from an
+accumulated Letterboxd profile (`datagen/.letterboxd_profile.json`, kept across
+CI runs and mirrored into `data.json`):
+
+- **The public RSS diary** (no key, no login) is folded in on every run. It only
+  carries the 50 newest entries, but nothing is ever forgotten, so from the day
+  the profile starts it becomes a complete diary going forward.
+- **What the data already knew**: the 4,000+ rated titles and dated reviews from
+  the original export seed the profile on first run.
+- **An export ZIP** whenever you want the full history in one go (Letterboxd →
+  Settings → Import & Export → Export your data), dropped at
+  `datagen/letterboxd-export.zip` or passed with `--export`:
+  ```bash
+  python datagen/letterboxd_profile.py client/public/data.json --export ~/Downloads/letterboxd-export.zip
+  ```
+
+Titles are matched to TMDB ids through the cached TMDB search, so the first run
+is a few minutes and later runs are instant. Letterboxd's site itself is behind
+a bot challenge, so the pipeline deliberately never scrapes it.
+
+Trakt, if configured, is layered on top: its watched set is unioned in, its
+ratings fill gaps Letterboxd hasn't rated. Where both rate a film, Letterboxd wins.
+
+Levels of refresh, lightest to heaviest:
 
 - **Roll the daily slate** — no API keys, instant. Reuses the films already in
   `data.json` and just rolls the 14-day "Today" window forward from today (the
@@ -55,24 +83,34 @@ Three levels of refresh, lightest to heaviest:
   npm run data:sync
   ```
 
-- **Fold in your recent Letterboxd diary** — reads your public RSS feed (no API
-  key, no export). This is how watches from services with no scrobbler reach the
-  site: **the Criterion Channel has no Trakt integration of any kind**, so those
-  nights only arrive if you log them on Letterboxd. Adds any films Trakt missed,
-  plus fresh ratings and review snippets:
+- **Update the Letterboxd profile** — folds the RSS diary into the accumulated
+  profile and resolves new titles to TMDB ids. Run before a rebuild:
+  ```bash
+  npm run data:profile
+  ```
+
+- **Fold in your recent Letterboxd diary** — the lighter, post-rebuild merge:
+  reads your public RSS feed, adds any films the rebuild missed, prunes them
+  from the picks, refreshes ratings and review snippets:
   ```bash
   npm run data:letterboxd
   ```
-  The feed carries the ~50 most recent entries and **no tags**, so full history
-  and diary tag counts (including `criterion channel`) still come from the ZIP
-  export via `build_data.py`. Safe to re-run — the merge is idempotent.
+  The feed carries **no tags**, so diary tag counts (including `criterion
+  channel`) still come from the ZIP export via `build_data.py`.
 
-- **Rebuild the recommendation engine** — the full discovery pipeline. Pulls your
-  taste profile from Trakt, finds fresh **unseen** films (canon lists + loved-
-  director filmographies + TMDB discovery across your under-watched decades and
-  languages), scores them on *canonical quality + blindspot-fill + director
-  affinity*, and regenerates the challenge pool, comfort-rewatch background pool,
-  director targets, mood buckets, and slates. Backs up `data.json` first
+- **Apply your in-app choices** — given a `state.json` pulled from D1 (the
+  workflow does this with `wrangler d1 execute`), prunes dismissed / watched /
+  not-tonight films from every pool and puts your shortlist first:
+  ```bash
+  npm run data:state
+  ```
+
+- **Rebuild the recommendation engine** — the full discovery pipeline. Builds
+  your taste profile from Letterboxd (plus Trakt if configured), finds fresh
+  **unseen** films (canon lists + loved-director filmographies + new releases +
+  TMDB discovery across your under-watched decades and languages), scores them on
+  *canonical quality + era fit + director affinity*, and regenerates the challenge
+  pool, comfort-rewatch background pool, director targets, mood buckets, and slates. Backs up `data.json` first
   (to `data-backups/` at the project root — kept out of the web build, last 5 kept):
   ```bash
   npm run data:rebuild
@@ -88,9 +126,16 @@ keeping a few comfort rewatches for background viewing:
 
 - **Challenge pool** (`queue` + `focus_pool_extra`) — unseen films scored on TMDB
   canonical quality, membership in the canon lists (Sight & Sound / Best Picture /
-  Criterion / AFI), how well they fill your under-watched decades and languages,
-  and affinity with directors you rate highly. A vote-count quality floor keeps
-  out junk; a per-director cap keeps the pool broad.
+  Criterion / AFI and your own MDBList lists), **era fit** — how much the film's
+  decade and genre look like your last 18 months of logging — and affinity with
+  directors you rate highly. A vote-count quality floor keeps out junk; a
+  per-director cap keeps the pool broad.
+
+  Era fit replaced the old "under-watched decade" bonus. That bonus pointed the
+  queue at the 1920s-40s (anyone's least-watched decades) and the slate read like
+  a syllabus: 32 of 94 picks pre-1960 while the diary's best months were mostly
+  new releases, 2000s, 80s and 90s. Blind spots keep their own page; the queue
+  is tuned to the run you're actually on. Today shows what it's tuned to.
 - **Background pool** — your own highest-rated films, surfaced as rewatches to
   "keep on in the background."
 
@@ -107,8 +152,10 @@ sync) are still here; they refresh the *seen* side but recycle the existing pool
 | `npm start` | Serve the production build |
 | `npm run check` | TypeScript type-check (no emit) |
 | `npm run data:refresh` | Roll the daily slate window forward to today (no API) |
-| `npm run data:sync` | Sync watched set / stats / blindspots from Trakt |
+| `npm run data:profile` | Update the Letterboxd profile (RSS diary + TMDB ids); `--export path.zip` folds in a full export |
+| `npm run data:sync` | Sync watched set / stats / blindspots from Trakt (optional) |
 | `npm run data:letterboxd` | Fold in recent Letterboxd diary via public RSS (catches Criterion Channel & anything Trakt missed) |
+| `npm run data:state` | Apply in-app choices from a `state.json` pulled from D1 (prune dismissed/watched, shortlist first) |
 | `npm run data:rebuild` | Full recommendation rebuild (discovers fresh unseen picks) |
 | `npm run data:shards` | Re-split `data.json` into the client shards (dev/build do this automatically) |
 | `npm run cf:deploy` | Build + deploy to Cloudflare Pages (manual; CI does this automatically) |
@@ -157,6 +204,8 @@ client/          React SPA
   public/data/       generated shards the client actually fetches (git-ignored)
   public/sw.js       service worker (offline + instant repeat loads)
   src/pages/         one file per route (today, queue, directors, ...)
+  src/components/tonight.tsx  the one-pick "Tonight" hero on Today
+  src/lib/filmState.tsx       local-first film state (Shortlist / Not tonight / Watched), mirrored to D1
   src/lib/data.ts    data types + core/shard loaders + helpers
   src/lib/mood.tsx   mood-engine pick logic
   src/components/command-palette.tsx  ⌘K search over the whole library
@@ -167,8 +216,10 @@ server/          Express app (index, routes, static, vite middleware)
 datagen/         Python data pipeline (TMDB / Trakt / Letterboxd)
   build_recommendations.py  the discovery engine (fresh unseen picks)
   rebuild.py                backup + rebuild wrapper (npm run data:rebuild)
-  build_from_trakt.py       watch-history sync
+  letterboxd_profile.py     the accumulated Letterboxd profile (seen set, ratings, diary)
   letterboxd_rss.py         recent diary via public RSS (no API key)
+  apply_state.py            fold in-app choices (D1) into the picks
+  build_from_trakt.py       optional Trakt watch-history sync
   refresh_slates.py         roll the daily slate window
   tmdb.py                   TMDB client + cache
 shared/          shared types
@@ -193,9 +244,10 @@ properly in July 2026 so it doesn't need re-litigating:
   so nothing on the device can tell *which* film played. Verified on the Shield
   (Android 11, Criterion app v10.303.1).
 
-So: log Criterion watches to Letterboxd as usual. `letterboxd_rss.py` then pulls
-them in automatically on every scheduled run and every "Sync now" — that path
-exists precisely because this one doesn't.
+So: log Criterion watches to Letterboxd as usual. The Letterboxd profile picks
+them up from the RSS feed on every scheduled run and every "Sync now", and never
+forgets them — that path exists precisely because this one doesn't. Trakt is a
+supplement, not a requirement.
 
 ## Notes
 

@@ -2,3 +2,7 @@
 .trakt_token.json
 .tmdb_cache.json
 __pycache__/
+.letterboxd_profile.json
+.letterboxd_profile.json.tmp
+letterboxd-export.zip
+letterboxd-export/

@@ -69,11 +69,13 @@ def _req(method, path, params=None, body=None):
 
 
 def pick_films(d, count):
-    """Today's focus first, then the highest-scored unseen queue, deduped."""
+    """Your shortlist first, then today's focus, then the highest-scored
+    unseen queue, deduped — the same order the app and the nudge use."""
+    shortlist = d.get("shortlist") or []
     focus = (d.get("slates") or [{}])[0].get("focus", []) or []
     queue = d.get("queue", []) or []
     seen, out = set(), []
-    for f in focus + queue:
+    for f in shortlist + focus + queue:
         t = f.get("tmdb_id")
         if t and t not in seen:
             seen.add(t)

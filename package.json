@@ -15,7 +15,9 @@
     "data:sync": "python datagen/build_from_trakt.py client/public/data.json client/public/data.json",
     "data:letterboxd": "python datagen/letterboxd_rss.py client/public/data.json client/public/data.json",
     "data:shards": "tsx script/data-shards.ts",
-    "cf:deploy": "npm run build && npx wrangler@4 pages deploy dist/public --project-name=cineprompt --commit-dirty=true"
+    "cf:deploy": "npm run build && npx wrangler@4 pages deploy dist/public --project-name=cineprompt --commit-dirty=true",
+    "data:profile": "python datagen/letterboxd_profile.py client/public/data.json",
+    "data:state": "python datagen/apply_state.py client/public/data.json state.json"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

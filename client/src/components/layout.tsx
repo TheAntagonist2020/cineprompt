@@ -208,8 +208,15 @@ export function Layout({ children }: { children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const { data } = useAppData();
+  const fs = useFilmState();
   // "Updated" reflects when the data was last generated (YYYY-MM-DD).
   const updated = data?.generated_at ? data.generated_at.slice(0, 10) : "";
+  const stateLabel =
+    fs.cloud === "synced"
+      ? "Choices synced across devices"
+      : fs.cloud === "offline"
+        ? "Choices saved on this device only"
+        : "Checking sync…";
 
   // Reset scroll on route change (hash routing doesn't do this automatically).
   useEffect(() => {
@@ -304,13 +311,21 @@ export function Layout({ children }: { children: ReactNode }) {
 
         <div className="px-6 py-5 border-t border-sidebar-border space-y-3">
           <p className="font-mono text-[10px] leading-relaxed text-muted-foreground/70">
-            Trakt + Letterboxd + TMDB
+            Letterboxd + TMDB{data?.taste?.sources?.includes("trakt") ? " + Trakt" : ""}
             {updated && (
               <>
                 <br />
                 Updated {updated}
               </>
             )}
+            <br />
+            <span
+              className={fs.cloud === "offline" ? "text-primary/80" : ""}
+              data-testid="state-sync-status"
+              title={fs.cloud === "offline" ? "The /api/state endpoint is unreachable; taps are kept locally and pushed when it returns." : undefined}
+            >
+              {stateLabel}
+            </span>
           </p>
           <SyncControl />
         </div>

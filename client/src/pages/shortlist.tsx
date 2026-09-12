@@ -1,27 +1,8 @@
-import { useAppData, posterUrl, type AppData, type QueueFilm } from "@/lib/data";
+import { buildFilmIndex, filmFromSnapshot, useAppData, type QueueFilm } from "@/lib/data";
 import { useFilmState } from "@/lib/filmState";
 import { LoadingScreen, PageShell } from "@/components/layout";
 import { Poster, FilmDetailModal, useFilmModal } from "@/components/film-ui";
 import { Bookmark } from "lucide-react";
-
-// Index every film we have full data for, by tmdb id (shortlisting happens from
-// the modal, which is always opened with a full film object).
-function filmIndex(data: AppData): Map<number, QueueFilm> {
-  const m = new Map<number, QueueFilm>();
-  const add = (arr?: QueueFilm[]) => {
-    for (const f of arr ?? []) if (f?.tmdb_id && !m.has(f.tmdb_id)) m.set(f.tmdb_id, f);
-  };
-  add(data.queue);
-  add(data.focus_pool_extra);
-  add(data.background_pool as unknown as QueueFilm[]);
-  for (const arr of Object.values(data.mood_picks ?? {})) add(arr);
-  if (data.todays_pick) add([data.todays_pick]);
-  for (const s of data.slates ?? []) {
-    add(s.focus);
-    add(s.background as unknown as QueueFilm[]);
-  }
-  return m;
-}
 
 export default function Shortlist() {
   const { data, loading } = useAppData();
@@ -29,17 +10,19 @@ export default function Shortlist() {
   const modal = useFilmModal();
   if (loading || !data) return <LoadingScreen />;
 
-  const idx = filmIndex(data);
+  // Full objects where a pool still carries the film; otherwise the snapshot
+  // the state store kept, so the list never silently shrinks after a rebuild.
+  const idx = buildFilmIndex(data);
   const films = fs
-    .shortlistIds()
-    .map((id) => idx.get(id))
+    .shortlistFilms()
+    .map(({ tmdb_id, film }) => idx.get(tmdb_id) ?? (film ? filmFromSnapshot(tmdb_id, film) : null))
     .filter((f): f is QueueFilm => !!f);
 
   return (
     <PageShell
-      eyebrow="Saved for later"
+      eyebrow={films.length ? `${films.length} saved for later` : "Saved for later"}
       title="Shortlist"
-      intro="Films you've set aside. Tap any to open it, jump to Stremio, or mark it watched."
+      intro="Films you've set aside. The first one is what Today calls Tonight. Tap any to open it, play it, or mark it watched."
     >
       {films.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center" data-testid="shortlist-empty">
@@ -61,19 +44,18 @@ export default function Shortlist() {
               data-testid={`shortlist-film-${f.tmdb_id}`}
               className="group text-left"
             >
-              {posterUrl(f.poster) ? (
-                <Poster
-                  path={f.poster}
-                  alt={f.title}
-                  className="w-full aspect-[2/3] rounded-sm film-shadow transition-transform group-hover:-translate-y-1"
-                />
-              ) : (
-                <div className="w-full aspect-[2/3] rounded-sm bg-muted" />
-              )}
+              <Poster
+                path={f.poster}
+                alt={f.title}
+                className="w-full aspect-[2/3] rounded-sm film-shadow transition-transform group-hover:-translate-y-1"
+              />
               <p className="font-serif text-sm leading-snug mt-2 text-foreground/85 group-hover:text-primary transition-colors">
                 {f.title}
               </p>
-              <p className="font-mono text-[11px] text-muted-foreground">{f.year}</p>
+              <p className="font-mono text-[11px] text-muted-foreground">
+                {f.year}
+                {f.directors?.length ? ` · ${f.directors[0]}` : ""}
+              </p>
             </button>
           ))}
         </div>

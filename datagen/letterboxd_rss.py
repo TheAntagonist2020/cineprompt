@@ -92,7 +92,11 @@ def parse_entries(xml: str) -> list:
         rating_raw = _text(item, "letterboxd:memberRating")
         # The description is the review body (plus a poster <img>); an entry
         # with no review still carries the poster markup, hence strip first.
-        review = strip_html(_text(item, "description"))
+        # The poster is worth keeping: it is how a brand-new release that no
+        # recommendation pool knows about still gets a picture in the app.
+        desc = _text(item, "description")
+        img = re.search(r'<img[^>]+src="([^"]+)"', desc)
+        review = strip_html(desc)
         review = re.sub(r"^Watched on \S+ \S+ \d{4}\.?\s*", "", review)
         out.append({
             "tmdb_id": int(tmdb_raw) if tmdb_raw.isdigit() else None,
@@ -102,7 +106,10 @@ def parse_entries(xml: str) -> list:
             "watched_date": watched,  # YYYY-MM-DD
             "rewatch": _text(item, "letterboxd:rewatch").lower() == "yes",
             "review": review,
+            # your own entry page: letterboxd.com/<you>/film/<slug>/ — the diary,
+            # not the film's public page
             "uri": _text(item, "link"),
+            "poster_url": img.group(1) if img else None,
         })
     return out
 
@@ -126,14 +133,21 @@ def merge(data: dict, entries: list) -> dict:
             by_tmdb[w["tmdb"]] = dict(w)
     for e in with_ids:
         cur = by_tmdb.get(e["tmdb_id"])
+        extras = {k: v for k, v in (("uri", e.get("uri")), ("rating", e.get("rating")),
+                                    ("poster", e.get("poster_url"))) if v}
         if cur is None:
             by_tmdb[e["tmdb_id"]] = {
                 "title": e["title"], "year": e["year"], "tmdb": e["tmdb_id"],
                 "last_watched": e["watched_date"], "plays": 2 if e["rewatch"] else 1,
+                **extras,
             }
-        elif e["watched_date"] > (cur.get("last_watched") or ""):
-            cur["last_watched"] = e["watched_date"]
-            cur["title"] = e["title"] or cur.get("title")
+        else:
+            if e["watched_date"] > (cur.get("last_watched") or ""):
+                cur["last_watched"] = e["watched_date"]
+                cur["title"] = e["title"] or cur.get("title")
+            for k, v in extras.items():
+                if k != "poster" or not cur.get("poster"):   # a TMDB poster path beats the Letterboxd one
+                    cur[k] = v
     d["recent_watches"] = sorted(
         by_tmdb.values(), key=lambda w: w.get("last_watched") or "", reverse=True
     )[:RECENT_WATCHES_CAP]

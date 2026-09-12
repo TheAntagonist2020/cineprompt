@@ -32,6 +32,7 @@ const DEAD_KEYS = [
   "review_quotes", // 1.06 MB — superseded by per-director quotes
   "diary_ratings", // 109 KB
   "watched_tmdb_set", // 27 KB
+  "letterboxd_profile", // mirror of datagen/.letterboxd_profile.json — pipeline-only
 ] as const;
 
 // Top-level keys pulled out of core into their own route-scoped shard.

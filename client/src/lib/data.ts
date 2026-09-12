@@ -275,6 +275,12 @@ export interface RecentWatch {
   tmdb: number;
   last_watched: string;
   plays: number;
+  /** your own Letterboxd entry page (letterboxd.com/<you>/film/<slug>/), when known */
+  uri?: string | null;
+  /** TMDB poster path, or an absolute Letterboxd poster URL for films TMDB lacks */
+  poster?: string | null;
+  /** the stars you gave it, 0.5–5 */
+  rating?: number | null;
 }
 
 // Background film: same shape as QueueFilm plus rewatch/ambient metadata.
@@ -342,6 +348,89 @@ export interface AppData {
   // ---------- v5: the deep-cuts lane ----------
   deep_cuts?: DeepCutFilm[];
   wildcard?: DeepCutFilm;
+  // ---------- v6: what the queue is tuned to ----------
+  taste?: Taste;
+  // in-app state applied by the pipeline (datagen/apply_state.py), if it ran
+  state_applied_at?: string;
+  shortlist?: QueueFilm[];
+}
+
+/**
+ * The window of your own viewing the main queue is tuned to: decade, genre
+ * and language shares of the last `window_days` of logged watches. Rendered
+ * on Today so the tuning is legible instead of implied.
+ */
+export interface Taste {
+  window_days: number;
+  since?: string | null;
+  watches: number;
+  decades: Record<string, number>;
+  genres: Record<string, number>;
+  languages: Record<string, number>;
+  sources: string[];
+}
+
+// ---------- Film index (tmdb_id -> full film object) ----------
+// Every film the core payload carries in full. Shortlisting and the Tonight
+// pick look films up here; anything that has since left every pool falls
+// back to the snapshot the state store kept.
+let filmIndexCache: { data: AppData; map: Map<number, QueueFilm> } | null = null;
+export function buildFilmIndex(data: AppData): Map<number, QueueFilm> {
+  if (filmIndexCache?.data === data) return filmIndexCache.map;
+  const m = new Map<number, QueueFilm>();
+  const add = (arr?: QueueFilm[] | null) => {
+    for (const f of arr ?? []) if (f?.tmdb_id && !m.has(f.tmdb_id)) m.set(f.tmdb_id, f);
+  };
+  add(data.shortlist);
+  add(data.queue);
+  add(data.focus_pool_extra);
+  add(data.background_pool as unknown as QueueFilm[]);
+  add(data.deep_cuts as unknown as QueueFilm[]);
+  if (data.wildcard) add([data.wildcard]);
+  for (const arr of Object.values(data.mood_picks ?? {})) add(arr);
+  if (data.todays_pick) add([data.todays_pick]);
+  for (const s of data.slates ?? []) {
+    add(s.focus);
+    add(s.background as unknown as QueueFilm[]);
+  }
+  filmIndexCache = { data, map: m };
+  return m;
+}
+
+/** A film object rebuilt from a state-store snapshot, for films no pool carries any more. */
+export function filmFromSnapshot(
+  tmdb_id: number,
+  snap: {
+    title: string;
+    year?: string | number | null;
+    poster?: string | null;
+    imdb_id?: string | null;
+    directors?: string[] | null;
+    runtime?: number | null;
+    reasons?: string[] | null;
+  },
+): QueueFilm {
+  return {
+    tmdb_id,
+    title: snap.title,
+    original_title: snap.title,
+    year: snap.year == null ? "" : String(snap.year),
+    overview: "",
+    tagline: "",
+    runtime: snap.runtime ?? 0,
+    genres: [],
+    directors: snap.directors ?? [],
+    writers: [],
+    cast: [],
+    poster: snap.poster ?? null,
+    backdrop: null,
+    vote_average: 0,
+    vote_count: 0,
+    imdb_id: snap.imdb_id ?? null,
+    original_language: "",
+    score: 0,
+    reasons: snap.reasons ?? ["on your shortlist"],
+  };
 }
 
 /**
@@ -560,6 +649,7 @@ export function getPosterIndex(d: AppData): Map<number, string | null> {
 // ---------- Image helpers ----------
 export function posterUrl(path: string | null | undefined, size = "w500"): string | null {
   if (!path) return null;
+  if (/^https?:\/\//.test(path)) return path; // already a full URL (Letterboxd art)
   return `https://image.tmdb.org/t/p/${size}${path}`;
 }
 export function backdropUrl(path: string | null | undefined, size = "original"): string | null {
@@ -582,10 +672,13 @@ export function actionLinks(opts: {
   const q = encodeURIComponent(opts.title);
   const links: ActionLink[] = [];
   if (opts.imdb_id) {
+    // The web link opens everywhere and hands off to the Stremio app where it
+    // is installed; the bare stremio:// scheme fails silently on phones
+    // without it, which is how a "play" button ends up doing nothing.
     links.push({
       label: "Stremio",
-      href: `stremio:///detail/movie/${opts.imdb_id}`,
-      external: false,
+      href: stremioUrl(opts.imdb_id),
+      external: true,
     });
   }
   links.push({
@@ -611,6 +704,10 @@ export function actionLinks(opts: {
   return links;
 }
 
+export function stremioUrl(imdb_id: string): string {
+  return `https://web.stremio.com/#/detail/movie/${imdb_id}/${imdb_id}`;
+}
+
 // ---------- TMDB / search links ----------
 export function tmdbUrl(tmdb_id: number | null | undefined, title?: string): string {
   if (tmdb_id) return `https://www.themoviedb.org/movie/${tmdb_id}`;
@@ -618,6 +715,17 @@ export function tmdbUrl(tmdb_id: number | null | undefined, title?: string): str
 }
 export function letterboxdTmdbUrl(tmdb_id: number): string {
   return `https://letterboxd.com/tmdb/${tmdb_id}/`;
+}
+
+/**
+ * Your diary entry for a watch: the entry page itself when the feed gave us
+ * one, else your diary for that day (which lists the entry), else the film.
+ */
+export function diaryUrl(user: string | undefined, w: RecentWatch): string {
+  if (w.uri) return w.uri;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(w.last_watched ?? "");
+  if (user && m) return `https://letterboxd.com/${user}/films/diary/for/${m[1]}/${m[2]}/${m[3]}/`;
+  return letterboxdTmdbUrl(w.tmdb);
 }
 
 // Slug a title for a Letterboxd film URL fallback.

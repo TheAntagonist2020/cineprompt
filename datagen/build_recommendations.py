@@ -8,7 +8,9 @@ films I haven't seen" engine slowly goes empty.
 
 This script regenerates that engine from scratch every run:
 
-  1. Pull the taste profile from Trakt  (watched set, ratings, history, stats).
+  1. Build the taste profile from Letterboxd (the accumulated profile in
+     .letterboxd_profile.json: watched set, ratings, dated diary) with Trakt
+     layered on top when configured — Trakt is optional, Letterboxd is not.
   2. Enrich the watched set via TMDB     (genres / languages / countries /
      directors + avg ratings)  ->  full blindspot picture + loved directors.
   3. Discover UNSEEN candidate films from four angles:
@@ -63,6 +65,19 @@ DIR_VOTE_FLOOR = 120      # a loved director's own films get a gentler floor
 MIN_RUNTIME = 60          # kill featurettes / concert videos
 QUALITY_VOTE_AVG = 6.3    # a film must clear this to be worth your time
 MOOD_PICK_CAP = 80        # films per mood bucket
+
+# The "current run": the window of your own viewing that the main queue is
+# tuned to. Eighteen months is long enough to smooth a slow season and short
+# enough that a phase (a horror summer, a new-release spring) still shows.
+RECENT_WINDOW_DAYS = 540
+ERA_FIT_MAX = 14          # bonus for a film from the decade you watch most
+ERA_OFF_PENALTY = 8       # pre-1960 films you have not been reaching for at all
+LANG_BLIND_BONUS = 6      # was 8: rarely-watched languages, demoted a notch
+GENRE_RUN_MAX = 6         # bonus for the genre you've been reaching for
+GENRE_NOISE = {"Drama"}   # on nearly every film, so it says nothing about a run
+NEW_VOTE_FLOOR = 60       # a release from the last 18 months has few votes yet
+NEW_VOTE_AVG = 5.8
+NEW_RELEASE_MONTHS = 18
 
 # world-cinema languages worth surfacing if you rarely watch them
 WORLD_LANGS = ["ja", "fr", "it", "ko", "de", "es", "ru", "sv",
@@ -197,8 +212,11 @@ def lang_name(code):
 
 # ---------------------------------------------------------------- Trakt pull
 def pull_trakt():
+    """Trakt is optional: it adds scrobbled plays and a rating fallback, but
+    the profile no longer depends on it. Returns None when unconfigured."""
     if not CID:
-        sys.exit("Set TRAKT_CLIENT_ID in datagen/.env")
+        print("Trakt: TRAKT_CLIENT_ID not set — building the profile from Letterboxd alone.")
+        return None
     print(f"Pulling Trakt taste profile for {USER}...")
     # /watched/movies is paginated (100/page) — page through it all, or the
     # watched set silently truncates to 100 and every "unseen" pick is wrong.
@@ -233,6 +251,72 @@ def pull_trakt():
     }
 
 
+def pull_profile(base):
+    """The taste profile: Letterboxd first, Trakt layered on top if configured.
+
+    Letterboxd is where the ratings actually get written and where every watch
+    gets logged (Criterion Channel included), so it is the source of truth for
+    "seen" and for taste. Trakt only knows what was scrobbled; it contributes
+    plays, dates and a rating fallback for films Letterboxd hasn't rated.
+    """
+    import letterboxd_profile as lp
+    profile = lp.load()
+    fresh = not profile.get("bootstrapped")
+    merged = lp.refresh_from_data(profile, base)
+    if fresh or merged:
+        print(f"Letterboxd profile: {'bootstrapped' if fresh else 'merged the data.json mirror,'} "
+              f"{merged} films")
+        lp.save(profile)
+    lb_watched = lp.watched_ids(profile)
+    lb_rating = lp.rating_of(profile)
+    lb_hist = lp.history(profile)
+    print(f"Letterboxd profile: {len(profile['films'])} films, {len(lb_watched)} with TMDB ids, "
+          f"{len(lb_rating)} rated, {len(lb_hist)} dated watches")
+
+    tr = pull_trakt()
+
+    watched = set(lb_watched)
+    if tr:
+        watched |= tr["watched_ids"]
+    # A film that was ever on record as seen stays seen: this carries over the
+    # RSS merges and in-app "watched" marks from previous runs.
+    watched |= {int(t) for t in (base.get("watched_tmdb_set") or []) if t}
+
+    rating_of = dict(tr["rating_of"]) if tr else {}
+    rating_of.update(lb_rating)                   # Letterboxd wins where both exist
+
+    last_of = dict(tr["last_of"]) if tr else {}
+    for tid, day in lp.last_of(profile).items():
+        if day and day > (last_of.get(tid) or ""):
+            last_of[tid] = day
+    play_of = dict(tr["play_of"]) if tr else {}
+    for tid, n in lp.play_of(profile).items():
+        play_of[tid] = max(play_of.get(tid, 0), n)
+    ty_of = dict(tr["ty_of"]) if tr else {}
+    for tid, ty in lp.ty_of(profile).items():
+        ty_of.setdefault(tid, ty)
+
+    seen_days, history = set(), []
+    for h in (tr["history"] if tr else []) + lb_hist:
+        m = h.get("movie") or {}
+        tid = (m.get("ids") or {}).get("tmdb")
+        day = (h.get("watched_at") or "")[:10]
+        if not tid or not day or (tid, day) in seen_days:
+            continue
+        seen_days.add((tid, day))
+        history.append(h)
+    history.sort(key=lambda h: h.get("watched_at") or "", reverse=True)
+
+    print(f"Profile: {len(watched)} seen, {len(rating_of)} rated, {len(history)} dated watches"
+          f" ({'Letterboxd + Trakt' if tr else 'Letterboxd only'})")
+    return {
+        "watched_ids": watched, "play_of": play_of, "last_of": last_of,
+        "ty_of": ty_of, "rating_of": rating_of, "history": history,
+        "uri_of": lp.uri_of(profile), "poster_of": lp.poster_of(profile),
+        "stats": tr["stats"] if tr else {}, "sources": ["letterboxd"] + (["trakt"] if tr else []),
+    }
+
+
 # ---------------------------------------------------------------- enrichment
 def enrich(tmdb, prof):
     """Walk the watched set through TMDB (cached) to build blindspots + loved
@@ -244,6 +328,7 @@ def enrich(tmdb, prof):
     by_decade = Counter()
     dir_seen = Counter(); dir_ratings = defaultdict(list)
     genre_ratings = defaultdict(list)
+    total_minutes = 0
     done = 0
     for tid in watched_ids:
         m = tmdb.movie(tid)
@@ -252,6 +337,7 @@ def enrich(tmdb, prof):
             print(f"  {done}/{len(watched_ids)}"); tmdb.save()
         if not m:
             continue
+        total_minutes += (m.get("runtime") or 0) * max(1, prof["play_of"].get(tid, 1))
         yr = m.get("year")
         if yr and str(yr).isdigit():
             by_decade[str((int(yr) // 10) * 10)] += 1
@@ -284,7 +370,48 @@ def enrich(tmdb, prof):
     loved_genres = {g for g, rs in genre_ratings.items()
                     if len(rs) >= 5 and sum(rs) / len(rs) >= 7.0}
 
+    # --- the current run: what you have actually been watching lately -------
+    # The old scoring pointed the main queue at your least-watched decades,
+    # which for anyone means the 1920s-40s, and the slate read like a syllabus.
+    # This is the opposite signal: the decades, genres and languages of your
+    # last RECENT_WINDOW_DAYS of logged watches, as shares. The queue is tuned
+    # to these; the blind spots keep their own page.
+    cutoff = (datetime.now() - timedelta(days=RECENT_WINDOW_DAYS)).date().isoformat()
+    recent_ids = {}
+    for h in prof["history"]:
+        day = (h.get("watched_at") or "")[:10]
+        tid = ((h.get("movie") or {}).get("ids") or {}).get("tmdb")
+        if tid and day >= cutoff:
+            recent_ids.setdefault(tid, day)
+    r_dec, r_gen, r_lang = Counter(), Counter(), Counter()
+    for tid in recent_ids:
+        m = tmdb.movie(tid)
+        if not m:
+            continue
+        yr = m.get("year")
+        if yr and str(yr).isdigit():
+            r_dec[(int(yr) // 10) * 10] += 1
+        for g in m.get("genres", []):
+            if g not in GENRE_NOISE:
+                r_gen[g] += 1
+        if m.get("original_language"):
+            r_lang[m["original_language"]] += 1
+
+    def shares(c):
+        tot = sum(c.values()) or 1
+        return {k: round(v / tot, 3) for k, v in c.most_common()}
+
+    recent_decades, recent_genres, recent_langs = shares(r_dec), shares(r_gen), shares(r_lang)
+    if recent_ids:
+        top = ", ".join(f"{k}s {v:.0%}" for k, v in list(recent_decades.items())[:4])
+        print(f"  current run ({len(recent_ids)} watches since {cutoff}): {top}")
+    else:
+        print("  current run: no dated watches in the window — era fit disabled")
+
     return {
+        "recent_decades": recent_decades, "recent_genres": recent_genres,
+        "recent_langs": recent_langs, "recent_count": len(recent_ids),
+        "recent_since": cutoff, "total_minutes": total_minutes,
         "genres": genres, "langs": langs, "countries": countries,
         "by_decade": by_decade, "decade_pct": decade_pct,
         "under_decades": under_decades, "lang_blind": lang_blind,
@@ -426,6 +553,26 @@ def gather_candidates(tmdb, base, prof, enr):
         print(f"  cult::{ch['id']:18s} {found:4d} candidates ({ch['label']})")
     tmdb.save()
 
+    # 8) what's new. Your best months were mostly new releases, and none of the
+    #    channels above can surface a film from the last eighteen months — the
+    #    vote floors see to that. Popularity-sorted so it's what people are
+    #    actually seeing right now, plus the best-rated of the same window.
+    since = (datetime.now() - timedelta(days=30 * NEW_RELEASE_MONTHS)).date().isoformat()
+    until = datetime.now().date().isoformat()   # released, not announced: Stremio can't play a trailer
+    new_found = 0
+    for params, pages in (
+        ({"sort_by": "popularity.desc", "vote_count.gte": NEW_VOTE_FLOOR}, 3),
+        ({"sort_by": "vote_average.desc", "vote_count.gte": 150}, 2),
+    ):
+        params = {**params, "primary_release_date.gte": since,
+                  "primary_release_date.lte": until, "with_runtime.gte": MIN_RUNTIME}
+        for r in tmdb.discover(params, pages=pages):
+            tid = r.get("id")
+            if tid and tid not in watched:
+                cand[tid]["sources"].add("new::recent")
+                new_found += 1
+    print(f"  new::recent           {new_found:4d} candidates (released since {since})")
+
     print(f"  {len(cand)} distinct unseen candidates gathered.")
     return cand
 
@@ -479,18 +626,27 @@ def score_candidate(m, info, enr):
         score += lane_bonus
         reasons.append(f"on your {lane_label} lane via {name}")
 
-    # decade blindspot
+    # era fit — the decades you have actually been living in lately. This
+    # replaces the old "under-watched decade" bonus, which pointed the main
+    # queue at the 1920s-40s because those are, for anyone, the decades
+    # watched least. The queue should read like your best months, not like a
+    # syllabus; the Blind Spots page still tracks the gaps.
     yr = m.get("year")
-    if yr and str(yr).isdigit():
+    rd = enr.get("recent_decades") or {}
+    if yr and str(yr).isdigit() and rd:
         dec = (int(yr) // 10) * 10
-        if dec in enr["under_decades"]:
-            score += 10
-            reasons.append(f"under-watched decade ({dec}s)")
+        share = rd.get(dec, 0.0)
+        top = max(rd.values()) or 1.0
+        if share >= 0.10:
+            score += round(ERA_FIT_MAX * share / top)
+            reasons.append(f"the {dec}s — {share:.0%} of your last {RECENT_WINDOW_DAYS // 30} months")
+        elif dec < 1960 and share < 0.03:
+            score -= ERA_OFF_PENALTY
 
     # language blindspot
     lc = m.get("original_language")
     if lc and lc in enr["lang_blind"]:
-        score += 8
+        score += LANG_BLIND_BONUS
         reasons.append(f"rarely-watched {lang_name(lc)}-language cinema")
 
     # genre affinity — was +3, the smallest term in the whole function, which is
@@ -499,6 +655,15 @@ def score_candidate(m, info, enr):
     if gmatch:
         score += 10
         reasons.append(f"your kind of {gmatch[0].lower()}")
+
+    # the genre you have been reaching for lately (share of the current run)
+    rg = enr.get("recent_genres") or {}
+    if rg:
+        run_g = max((g for g in m.get("genres", []) if g in rg), key=lambda g: rg[g], default=None)
+        if run_g and rg[run_g] >= 0.12:
+            score += round(GENRE_RUN_MAX * rg[run_g] / (max(rg.values()) or 1))
+            if not gmatch:
+                reasons.append(f"{run_g.lower()} is what you've been reaching for")
 
     # The genre canon itself: a film a real audience watched and argued over,
     # which the aggregate rating undersells. This is where exploitation,
@@ -718,17 +883,16 @@ def build_mood_picks(meta_ids, films):
 def build(base_path, out_path):
     base = json.load(open(base_path, encoding="utf-8"))
     tmdb = TMDB()
-    prof = pull_trakt()
+    prof = pull_profile(base)
     watched = prof["watched_ids"]
 
-    # Guard against a partial / rate-limited Trakt pull: if the watched set came
-    # back far smaller than what's already on record, the "unseen" filter would
-    # be wrong and we'd recommend films you've seen. Abort rather than ship it.
-    prev_watched = len(base.get("watched_tmdb_set", []))
-    if prev_watched >= 500 and len(watched) < prev_watched * 0.7:
+    # The seen set is a union of Letterboxd, Trakt and everything previously
+    # on record, so it can only grow. If it is still tiny, nothing upstream
+    # worked and every "unseen" pick would be wrong — abort rather than ship it.
+    if len(watched) < 100:
         sys.exit(
-            f"Trakt pull looks partial: {len(watched)} watched vs {prev_watched} "
-            f"on record. Aborting so degraded data isn't written (try again shortly)."
+            f"Only {len(watched)} films on record as seen — the Letterboxd profile "
+            f"is empty and Trakt is unavailable. Refusing to build from nothing."
         )
 
     enr = enrich(tmdb, prof)
@@ -759,11 +923,16 @@ def build(base_path, out_path):
         vc = m.get("vote_count") or 0
         is_canon = bool(info["canon"])
         is_cult = any(s.startswith("cult::") for s in info["sources"])
+        is_new = any(s.startswith("new::") for s in info["sources"])
         # A cult-channel find is judged on its own terms. Holding Showgirls or a
         # 1981 slasher to the 6.3 prestige average is what emptied the genre
         # side of the slate: they don't fail that bar, the bar isn't about them.
+        # A release from the last eighteen months hasn't had time to collect
+        # votes at all, so it gets its own floor too.
         if is_cult:
             floor, avg_floor = CULT_VOTE_FLOOR, CULT_VOTE_AVG
+        elif is_new:
+            floor, avg_floor = NEW_VOTE_FLOOR, NEW_VOTE_AVG
         elif is_canon or any(s.startswith("dir::") for s in info["sources"]):
             floor, avg_floor = DIR_VOTE_FLOOR, QUALITY_VOTE_AVG
         else:
@@ -922,13 +1091,23 @@ def build(base_path, out_path):
             })
     by_month = dict(sorted(by_month.items())[-12:])
     recent_watches = recent_watches[:50]
+    # Each row links to your own Letterboxd entry and carries its own poster,
+    # so a brand-new release that no pool knows about still renders, and the
+    # rating you gave it. (Watched-set enrichment already cached these films.)
+    for w in recent_watches:
+        tid = w["tmdb"]
+        w["uri"] = prof.get("uri_of", {}).get(tid)
+        fm = tmdb.movie(tid)
+        w["poster"] = (fm.get("poster") if fm else None) or prof.get("poster_of", {}).get(tid)
+        rv = prof["rating_of"].get(tid)
+        w["rating"] = round(rv / 2.0, 1) if rv else None
 
     dist = Counter(str(v) for v in prof["rating_of"].values() if v)
     movie_stats = (prof["stats"].get("movies", {})
                    if isinstance(prof["stats"], dict) else {})
     stats = {
-        "total_watched": movie_stats.get("watched", len(watched)),
-        "total_minutes": movie_stats.get("minutes", 0),
+        "total_watched": len(watched),
+        "total_minutes": max(int(movie_stats.get("minutes") or 0), int(enr.get("total_minutes") or 0)),
         "total_rated": len(prof["rating_of"]),
         "this_week": this_week,
         "ratings_distribution": {str(k): dist.get(str(k), 0) for k in range(1, 11)},
@@ -1033,10 +1212,26 @@ def build(base_path, out_path):
     # within a day but different tomorrow.
     wildcard = deep_cuts[today.toordinal() % len(deep_cuts)] if deep_cuts else None
 
+    # --- the taste window, for the UI to say what the queue is tuned to ------
+    taste = {
+        "window_days": RECENT_WINDOW_DAYS, "since": enr.get("recent_since"),
+        "watches": enr.get("recent_count", 0),
+        "decades": {str(k): v for k, v in (enr.get("recent_decades") or {}).items()},
+        "genres": enr.get("recent_genres") or {},
+        "languages": enr.get("recent_langs") or {},
+        "sources": prof.get("sources", []),
+    }
+
     # --- assemble ----------------------------------------------------------
     d = dict(base)
+    # State-derived fields belong to apply_state.py, which runs after this on
+    # a fresh D1 read. Carrying the previous run's copy forward would resend a
+    # shortlist you have since cleared if that read fails.
+    d.pop("shortlist", None)
+    d.pop("state_applied_at", None)
     now_iso = datetime.now(timezone.utc).astimezone().isoformat()
     d.update({
+        "taste": taste,
         "stats": stats, "blindspots": blindspots,
         "watched_tmdb_set": sorted(watched), "recent_watches": recent_watches,
         "by_month": by_month, "diary_ratings": {**base.get("diary_ratings", {}), **diary_ratings},

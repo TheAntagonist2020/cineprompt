@@ -15,7 +15,7 @@
  *
  * Bump VERSION to retire every cache from an older release.
  */
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL = `cineprompt-shell-${VERSION}`;
 const ASSETS = `cineprompt-assets-${VERSION}`;
 const DATA = `cineprompt-data-${VERSION}`;

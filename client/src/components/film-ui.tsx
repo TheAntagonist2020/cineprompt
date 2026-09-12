@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { ExternalLink, Star, StarHalf, X, Play, Repeat, Waves, Moon, Bookmark, BookmarkCheck, Check, RotateCcw } from "lucide-react";
-import { useFilmState } from "@/lib/filmState";
+import { useFilmState, type FilmSnapshot } from "@/lib/filmState";
 import {
   actionLinks,
   posterUrl,
@@ -298,12 +298,24 @@ export function FilmActions({
   film,
   className = "",
 }: {
-  film: { tmdb_id: number };
+  film: { tmdb_id: number } & Partial<FilmSnapshot>;
   className?: string;
 }) {
   const fs = useFilmState();
-  if (!fs.available) return null; // no backend (e.g. Express dev) -> hide
   const id = film.tmdb_id;
+  // Carry enough of the film along that a shortlisted title still renders
+  // after the pipeline has rotated it out of every pool.
+  const snap: FilmSnapshot | undefined = film.title
+    ? {
+        title: film.title,
+        year: film.year ?? null,
+        poster: film.poster ?? null,
+        imdb_id: film.imdb_id ?? null,
+        directors: film.directors ?? null,
+        runtime: film.runtime ?? null,
+        reasons: film.reasons ?? null,
+      }
+    : undefined;
   const shortlisted = fs.isShortlisted(id);
   const watched = fs.isWatched(id);
   const cleared = !fs.get(id)?.status && !fs.get(id)?.snooze_until;
@@ -339,20 +351,20 @@ export function FilmActions({
     <div className={`flex flex-wrap gap-2 ${className}`} data-testid={`film-actions-${id}`}>
       <Btn
         testid={`action-snooze-${id}`}
-        onClick={() => fs.snooze(id)}
+        onClick={() => fs.snooze(id, snap)}
         icon={<Moon className="h-3.5 w-3.5" />}
         label="Not tonight"
       />
       <Btn
         testid={`action-shortlist-${id}`}
-        onClick={() => fs.toggleShortlist(id)}
+        onClick={() => fs.toggleShortlist(id, snap)}
         active={shortlisted}
         icon={shortlisted ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
         label={shortlisted ? "Shortlisted" : "Shortlist"}
       />
       <Btn
         testid={`action-watched-${id}`}
-        onClick={() => fs.markWatched(id)}
+        onClick={() => fs.markWatched(id, snap)}
         active={watched}
         icon={<Check className="h-3.5 w-3.5" />}
         label={watched ? "Watched" : "Mark watched"}
