@@ -182,6 +182,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # your calendar day for "not tonight" (repo variable; default America/Chicago)
+          USER_TZ: ${{ vars.USER_TZ }}
           PYTHONUTF8: "1"
         run: |
           npx wrangler@4 d1 execute cineprompt-db --remote --json \
@@ -263,6 +265,8 @@ jobs:
           NUDGE_MODE: ${{ github.event.schedule == '0 2 * * *' && 'followup' || 'evening' }}
           # repo variable (Settings -> Variables): set to 1 to use web.stremio.com links
           STREMIO_WEB: ${{ vars.STREMIO_WEB }}
+          # the nudge's day is your calendar day, not the runner's UTC date
+          NUDGE_TZ: ${{ vars.USER_TZ }}
           PYTHONUTF8: "1"
         run: python datagen/nudge.py client/public/data.json
 

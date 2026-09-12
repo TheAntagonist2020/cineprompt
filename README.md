@@ -4,7 +4,7 @@ A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd
 
 Your choices in the app — **Shortlist**, **Not tonight**, **Watched** — are saved on the device first and mirrored to a Cloudflare D1 store, so they survive a reload, a rebuild, and a switch from phone to TV. The pipeline reads them back (see [DEPLOY.md](DEPLOY.md#let-the-pipeline-see-your-in-app-choices)) so the phone nudge and the Stremio row agree with the app.
 
-The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. The Express server only serves the built client — there is no database or API at runtime.
+The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and three small Pages Functions (`/api/state`, `/api/health`, `/api/sync`, in `functions/api/`) provide the only runtime backend: a D1 table for your choices and a trigger for the rebuild workflow. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
 
 Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library — every film in every filmography, collection, and canon list, plus directors and collections by name.
 
@@ -39,8 +39,9 @@ npm start          # serves the build on PORT (default 5000)
 
 The client reads `client/public/data.json`. Credentials live in `datagen/.env`
 (git-ignored — copy `datagen/.env.example` and fill in your keys). Required:
-`TMDB_API_KEY` and `LETTERBOXD_USER`. Optional: `TRAKT_CLIENT_ID` /
-`TRAKT_USER` (adds scrobbled plays and a rating fallback; nothing depends on it).
+`TMDB_API_KEY`. Recommended: `LETTERBOXD_USER` (falls back to `user.letterboxd`
+in `data.json`). Optional: `TRAKT_CLIENT_ID` / `TRAKT_USER` (adds scrobbled
+plays and a rating fallback; nothing depends on it).
 
 ### Letterboxd is the source of truth
 

@@ -133,13 +133,41 @@ function tomorrowISO(): string {
   return `${y}-${m}-${day}`;
 }
 
-async function pushToCloud(id: number, s: FilmState): Promise<boolean> {
+/** A D1 row as the API returns it, in local shape. */
+function remoteToState(f: any): FilmState {
+  return {
+    status: f.status ?? null,
+    snooze_until: f.snooze_until ?? null,
+    notes: f.notes ?? null,
+    rating: f.rating ?? null,
+    updated_at: Number(f.updated_at ?? 0) * 1000,
+    film: f.title
+      ? {
+          title: f.title,
+          year: f.year ?? null,
+          poster: f.poster ?? null,
+          imdb_id: f.imdb_id ?? null,
+          directors: f.directors ?? null,
+          runtime: f.runtime ?? null,
+          reasons: f.reasons ?? null,
+        }
+      : null,
+  };
+}
+
+type PushResult = { ok: true; stale?: FilmState } | { ok: false };
+
+// The write carries its own timestamp; the server refuses anything older than
+// what it holds and hands back the newer row, so an offline phone reconnecting
+// cannot clobber a choice made on the TV in the meantime.
+async function pushToCloud(id: number, s: FilmState): Promise<PushResult> {
   const body: any = {
     tmdb_id: id,
     status: s.status ?? null,
     snooze_until: s.snooze_until ?? null,
     notes: s.notes ?? null,
     rating: s.rating ?? null,
+    updated_at: s.updated_at ?? Date.now(),
   };
   if (s.film) body.film = s.film;
   try {
@@ -148,9 +176,13 @@ async function pushToCloud(id: number, s: FilmState): Promise<boolean> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    return r.ok;
+    if (r.status === 409) {
+      const d = await r.json().catch(() => null);
+      return { ok: true, stale: d?.film ? remoteToState(d.film) : undefined };
+    }
+    return { ok: r.ok };
   } catch {
-    return false;
+    return { ok: false };
   }
 }
 
@@ -159,6 +191,27 @@ export function FilmStateProvider({ children }: { children: ReactNode }) {
   const [cloud, setCloud] = useState<CloudStatus>("checking");
   const mapRef = useRef(map);
   mapRef.current = map;
+
+  // Every local change goes through here so the ref, React state and
+  // localStorage never disagree (a mutation between render and commit would
+  // otherwise read a stale map).
+  const commit = useCallback((next: Map<number, FilmState>) => {
+    mapRef.current = next;
+    setMap(next);
+    writeLocal(next);
+  }, []);
+
+  // The server said it holds something newer: take it.
+  const adopt = useCallback(
+    (id: number, remote: FilmState) => {
+      const next = new Map(mapRef.current);
+      const mine = next.get(id);
+      if (isEmpty(remote) && !remote.film) next.delete(id);
+      else next.set(id, { ...remote, film: remote.film ?? mine?.film ?? null });
+      commit(next);
+    },
+    [commit],
+  );
 
   // Reconcile with the cloud once on mount: newest write wins per film, and
   // anything newer locally is pushed up (this is how a tap made while the API
@@ -177,24 +230,7 @@ export function FilmStateProvider({ children }: { children: ReactNode }) {
           const id = Number(f.tmdb_id);
           if (!Number.isFinite(id)) continue;
           cloudIds.add(id);
-          const remote: FilmState = {
-            status: f.status ?? null,
-            snooze_until: f.snooze_until ?? null,
-            notes: f.notes ?? null,
-            rating: f.rating ?? null,
-            updated_at: Number(f.updated_at ?? 0) * 1000,
-            film: f.title
-              ? {
-                  title: f.title,
-                  year: f.year ?? null,
-                  poster: f.poster ?? null,
-                  imdb_id: f.imdb_id ?? null,
-                  directors: f.directors ?? null,
-                  runtime: f.runtime ?? null,
-                  reasons: f.reasons ?? null,
-                }
-              : null,
-          };
+          const remote = remoteToState(f);
           const mine = local.get(id);
           if (!mine || (mine.updated_at ?? 0) <= (remote.updated_at ?? 0)) {
             merged.set(id, { ...remote, film: remote.film ?? mine?.film ?? null });
@@ -203,13 +239,18 @@ export function FilmStateProvider({ children }: { children: ReactNode }) {
           }
         }
         for (const id of local.keys()) if (!cloudIds.has(id)) toPush.push(id);
-        setMap(merged);
-        writeLocal(merged);
-        setCloud("synced");
+        commit(merged);
+        // "Synced" only once every local-only choice has actually landed; a
+        // failed push leaves the status honest and is retried next visit.
+        let allOk = true;
         for (const id of toPush) {
           const s = merged.get(id);
-          if (s && !isEmpty(s)) void pushToCloud(id, s);
+          if (!s || (isEmpty(s) && !s.film)) continue;
+          const res = await pushToCloud(id, s);
+          if (!res.ok) allOk = false;
+          else if (res.stale) adopt(id, res.stale);
         }
+        if (alive) setCloud(allOk ? "synced" : "offline");
       })
       .catch(() => {
         if (alive) setCloud("offline");
@@ -220,24 +261,29 @@ export function FilmStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Local write first, always; then mirror to the cloud, best effort.
-  const patch = useCallback((tmdbId: number, p: FilmState, film?: FilmSnapshot) => {
-    const snap = snapshotOf(film);
-    setMap((prev) => {
-      const next = new Map(prev);
-      const cur = prev.get(tmdbId) ?? {};
+  // `forget` drops the snapshot too: an undo leaves nothing behind, locally
+  // or (the server deletes an all-null row) in D1.
+  const patch = useCallback(
+    (tmdbId: number, p: FilmState, film?: FilmSnapshot, forget = false) => {
+      const snap = snapshotOf(film);
+      const cur = mapRef.current.get(tmdbId) ?? {};
       const merged: FilmState = {
         ...cur,
         ...p,
         updated_at: Date.now(),
-        film: snap ?? cur.film ?? null,
+        film: forget ? null : (snap ?? cur.film ?? null),
       };
+      const next = new Map(mapRef.current);
       if (isEmpty(merged) && !merged.film) next.delete(tmdbId);
       else next.set(tmdbId, merged);
-      writeLocal(next);
-      void pushToCloud(tmdbId, merged).then((ok) => setCloud(ok ? "synced" : "offline"));
-      return next;
-    });
-  }, []);
+      commit(next);
+      void pushToCloud(tmdbId, merged).then((res) => {
+        setCloud(res.ok ? "synced" : "offline");
+        if (res.ok && res.stale) adopt(tmdbId, res.stale);
+      });
+    },
+    [commit, adopt],
+  );
 
   const value = useMemo<FilmStateContextValue>(() => {
     const today = todayISO();
@@ -273,7 +319,8 @@ export function FilmStateProvider({ children }: { children: ReactNode }) {
       toggleShortlist: (id, film) =>
         patch(id, { status: map.get(id)?.status === "shortlist" ? null : "shortlist" }, film),
       markWatched: (id, film) => patch(id, { status: "watched", snooze_until: null }, film),
-      clear: (id) => patch(id, { status: null, snooze_until: null }),
+      clear: (id) =>
+        patch(id, { status: null, snooze_until: null, notes: null, rating: null }, undefined, true),
     };
   }, [map, cloud, patch]);
 

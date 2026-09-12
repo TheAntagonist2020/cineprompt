@@ -185,6 +185,9 @@ into the picks before the Stremio row and the phone nudge are built: dismissed
 and watched films leave every pool, "not tonight" holds a film out of the slate
 until tomorrow, and your shortlist leads the nudge and the Stremio row.
 
+"Not tonight" dates are compared on your calendar day (`America/Chicago`; set a
+`USER_TZ` repository variable to change it), not the runner's UTC clock.
+
 That step needs the same `CLOUDFLARE_API_TOKEN` to carry **Account → D1 → Edit**
 in addition to Pages: Edit. Edit the existing token (Cloudflare → My Profile →
 API Tokens → the token → Edit → add the permission → Continue to summary →

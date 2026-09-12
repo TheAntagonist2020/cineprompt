@@ -261,9 +261,11 @@ def pull_profile(base):
     """
     import letterboxd_profile as lp
     profile = lp.load()
-    if not profile.get("bootstrapped"):
-        added = lp.bootstrap_from_data(profile, base)
-        print(f"Letterboxd profile: bootstrapped {added} films from data.json")
+    fresh = not profile.get("bootstrapped")
+    merged = lp.refresh_from_data(profile, base)
+    if fresh or merged:
+        print(f"Letterboxd profile: {'bootstrapped' if fresh else 'merged the data.json mirror,'} "
+              f"{merged} films")
         lp.save(profile)
     lb_watched = lp.watched_ids(profile)
     lb_rating = lp.rating_of(profile)
@@ -555,13 +557,14 @@ def gather_candidates(tmdb, base, prof, enr):
     #    vote floors see to that. Popularity-sorted so it's what people are
     #    actually seeing right now, plus the best-rated of the same window.
     since = (datetime.now() - timedelta(days=30 * NEW_RELEASE_MONTHS)).date().isoformat()
+    until = datetime.now().date().isoformat()   # released, not announced: Stremio can't play a trailer
     new_found = 0
     for params, pages in (
         ({"sort_by": "popularity.desc", "vote_count.gte": NEW_VOTE_FLOOR}, 3),
         ({"sort_by": "vote_average.desc", "vote_count.gte": 150}, 2),
     ):
         params = {**params, "primary_release_date.gte": since,
-                  "with_runtime.gte": MIN_RUNTIME}
+                  "primary_release_date.lte": until, "with_runtime.gte": MIN_RUNTIME}
         for r in tmdb.discover(params, pages=pages):
             tid = r.get("id")
             if tid and tid not in watched:
@@ -1210,6 +1213,11 @@ def build(base_path, out_path):
 
     # --- assemble ----------------------------------------------------------
     d = dict(base)
+    # State-derived fields belong to apply_state.py, which runs after this on
+    # a fresh D1 read. Carrying the previous run's copy forward would resend a
+    # shortlist you have since cleared if that read fails.
+    d.pop("shortlist", None)
+    d.pop("state_applied_at", None)
     now_iso = datetime.now(timezone.utc).astimezone().isoformat()
     d.update({
         "taste": taste,

@@ -2,10 +2,14 @@
 //
 //   GET  -> { films: [{ tmdb_id, status, snooze_until, notes, rating, updated_at,
 //                       title, year, poster, imdb_id, directors, runtime, reasons }] }
-//   POST -> body { tmdb_id, status?, snooze_until?, notes?, rating?, film? }
+//   POST -> body { tmdb_id, status?, snooze_until?, notes?, rating?, film?, updated_at? }
 //           (partial upsert; `film` is a snapshot {title, year, poster, imdb_id,
 //           directors[], runtime, reasons[]} so a shortlisted film survives the
-//           twice-daily rebuild that may drop it from every pool)
+//           twice-daily rebuild that may drop it from every pool; `updated_at`
+//           is the client's write time in ms — a write older than the stored
+//           row is refused with 409 and the current row, so a phone that was
+//           offline cannot overwrite a newer choice made on the TV. A write
+//           that leaves no state at all (every field null) deletes the row.)
 //
 // The schema is applied here, on first use, rather than by a deploy step: the
 // original schema.sql was never run against the production database, which is
@@ -83,11 +87,7 @@ export const onRequestGet = async (context: any) => {
             title, year, poster, imdb_id, directors, runtime, reasons
        FROM film_state`,
   ).all();
-  const films = (results ?? []).map((r: any) => ({
-    ...r,
-    directors: parseJsonArray(r.directors),
-    reasons: parseJsonArray(r.reasons),
-  }));
+  const films = (results ?? []).map(rowOut);
   return Response.json({ films });
 };
 
@@ -101,7 +101,7 @@ export const onRequestPost = async (context: any) => {
     return badRequest("invalid JSON body");
   }
   const id = Number(body?.tmdb_id);
-  if (!Number.isFinite(id) || id <= 0) return badRequest("tmdb_id required");
+  if (!Number.isInteger(id) || id <= 0) return badRequest("tmdb_id must be a positive integer");
   await ensureSchema(context.env.DB);
 
   // Merge: a field present in the body overrides; otherwise keep the stored
@@ -110,11 +110,31 @@ export const onRequestPost = async (context: any) => {
     .prepare("SELECT * FROM film_state WHERE tmdb_id = ?")
     .bind(id)
     .first();
+  // Newest write wins, on the client's clock (the same clock the client uses
+  // to order its own writes). No timestamp means "now".
+  const incomingMs = Number(body.updated_at);
+  const incoming = Number.isFinite(incomingMs) && incomingMs > 0
+    ? Math.floor(incomingMs / 1000)
+    : Math.floor(Date.now() / 1000);
+  if (cur && Number(cur.updated_at) > incoming) {
+    return new Response(JSON.stringify({ stale: true, film: rowOut(cur) }), {
+      status: 409,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   const pick = (k: string) => (k in body ? body[k] : cur ? cur[k] : null);
   const status = pick("status") ?? null;
   const snooze_until = pick("snooze_until") ?? null;
   const notes = pick("notes") ?? null;
   const rating = pick("rating") ?? null;
+
+  // Nothing left to remember: drop the row rather than keep a null husk
+  // that would resurface on every reconciliation.
+  if (status == null && snooze_until == null && notes == null && rating == null) {
+    await context.env.DB.prepare("DELETE FROM film_state WHERE tmdb_id = ?").bind(id).run();
+    return Response.json({ ok: true, deleted: true, updated_at: incoming });
+  }
 
   // The snapshot only ever fills in — a later write without `film` keeps it.
   const film = body.film && typeof body.film === "object" ? body.film : null;
@@ -130,18 +150,22 @@ export const onRequestPost = async (context: any) => {
   await context.env.DB.prepare(
     `INSERT INTO film_state (tmdb_id, status, snooze_until, notes, rating, updated_at,
                              title, year, poster, imdb_id, directors, runtime, reasons)
-     VALUES (?1, ?2, ?3, ?4, ?5, unixepoch(), ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?13, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
      ON CONFLICT(tmdb_id) DO UPDATE SET
-       status = ?2, snooze_until = ?3, notes = ?4, rating = ?5, updated_at = unixepoch(),
+       status = ?2, snooze_until = ?3, notes = ?4, rating = ?5, updated_at = ?13,
        title = ?6, year = ?7, poster = ?8, imdb_id = ?9, directors = ?10, runtime = ?11, reasons = ?12`,
   )
     .bind(id, status, snooze_until, notes, rating,
           title, year == null ? null : String(year), poster, imdb_id, directors,
-          runtime == null ? null : Number(runtime), reasons)
+          runtime == null ? null : Number(runtime), reasons, incoming)
     .run();
 
-  return Response.json({ ok: true, updated_at: Math.floor(Date.now() / 1000) });
+  return Response.json({ ok: true, updated_at: incoming });
 };
+
+function rowOut(r: any) {
+  return { ...r, directors: parseJsonArray(r.directors), reasons: parseJsonArray(r.reasons) };
+}
 
 function badRequest(msg: string) {
   return new Response(JSON.stringify({ error: msg }), {

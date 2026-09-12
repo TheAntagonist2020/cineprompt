@@ -79,6 +79,19 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _env_file():
+    """datagen/.env, the same file the other pipeline scripts read."""
+    env = {}
+    p = os.path.join(HERE, ".env")
+    if os.path.exists(p):
+        for line in open(p, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+    return env
+
+
 # ---------------------------------------------------------------- store ----
 def empty_profile():
     return {"version": VERSION, "films": {}, "diary": {}, "bootstrapped": False,
@@ -188,9 +201,22 @@ def bootstrap_from_mirror(profile, data):
     return n
 
 
+def refresh_from_data(profile, data):
+    """Bring the profile up to date with data.json: the full bootstrap on a
+    fresh profile, and on every run a merge of the mirror data.json carries —
+    the two ride in different caches, and whichever is newer must win rather
+    than the stale one being mirrored back over the fresh one. Merging is
+    idempotent and never drops a row, so doing it every time is safe."""
+    if not data:
+        return 0
+    if not profile.get("bootstrapped"):
+        return bootstrap_from_data(profile, data)
+    return bootstrap_from_mirror(profile, data)
+
+
 def bootstrap_from_data(profile, data):
     """Seed the profile from whatever the current data.json already knows:
-    a mirrored copy of a previous profile if one is there, else the
+    a mirrored copy of a previous profile if one is there, plus the
     export-derived diary ratings and review quotes, the tag explorer's dated
     films, and the recent-watches list (which carries TMDB ids)."""
     before = len(profile["films"])
@@ -421,7 +447,8 @@ def main():
             return v
         return default
 
-    export = take("--export", os.environ.get("LETTERBOXD_EXPORT") or None)
+    envf = _env_file()
+    export = take("--export", os.environ.get("LETTERBOXD_EXPORT") or envf.get("LETTERBOXD_EXPORT") or None)
     user = take("--user")
     no_rss = "--no-rss" in args
     no_resolve = "--no-resolve" in args
@@ -431,9 +458,10 @@ def main():
     data = json.load(open(data_path, encoding="utf-8")) if os.path.exists(data_path) else {}
     profile = load()
 
-    if not profile.get("bootstrapped") and data:
-        added = bootstrap_from_data(profile, data)
-        print(f"bootstrapped {added} films from {os.path.relpath(data_path)}")
+    fresh = not profile.get("bootstrapped")
+    merged = refresh_from_data(profile, data)
+    if data:
+        print(f"{'bootstrapped' if fresh else 'merged the mirror:'} {merged} films from {os.path.relpath(data_path)}")
 
     if export:
         n = ingest_export(profile, export)
@@ -441,7 +469,8 @@ def main():
 
     if not no_rss:
         from letterboxd_rss import fetch_feed, parse_entries
-        env_user = user or os.environ.get("LETTERBOXD_USER") or (data.get("user") or {}).get("letterboxd")
+        env_user = (user or os.environ.get("LETTERBOXD_USER") or envf.get("LETTERBOXD_USER")
+                    or (data.get("user") or {}).get("letterboxd"))
         if not env_user:
             print("rss: no Letterboxd handle (LETTERBOXD_USER / --user / data.user.letterboxd) — skipped")
         else:

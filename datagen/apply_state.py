@@ -13,7 +13,8 @@ SELECT over film_state (see the workflow), or a plain list of rows.
 What it does to data.json:
   * watched  -> added to watched_tmdb_set, pruned from every unseen pool
   * dismissed -> pruned from every unseen pool
-  * snoozed  -> pruned from the slate window while the snooze holds
+  * snoozed  -> pruned from every pool while the snooze holds (the nudge and
+                the Stremio row read the pools, so "not tonight" must reach them)
   * shortlist -> `shortlist`: full film objects (from the pools, or rebuilt
                  from the stored snapshot), newest first. The nudge and the
                  Stremio row lead with these.
@@ -22,8 +23,23 @@ Usage:
     python apply_state.py <data.json> <state.json>
 """
 import json
+import os
 import sys
-from datetime import date
+from datetime import date, datetime
+
+# The app writes snooze dates from the phone's calendar; the runner's clock is
+# UTC and the evening runs fire after UTC midnight. Compare on the user's day.
+DEFAULT_TZ = "America/Chicago"
+
+
+def local_today():
+    tz = os.environ.get("USER_TZ") or os.environ.get("NUDGE_TZ") or DEFAULT_TZ
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(tz)).date()
+    except Exception:  # no tzdata on this runner: UTC is the best we have
+        print(f"apply_state: timezone {tz!r} unavailable, using the UTC date")
+        return date.today()
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -75,7 +91,7 @@ def film_from_row(r):
 
 
 def apply(d, rows, today=None):
-    today = (today or date.today()).isoformat()
+    today = (today or local_today()).isoformat()
     watched, dismissed, snoozed, shortlist = set(), set(), set(), []
     for r in rows:
         try:
@@ -93,12 +109,14 @@ def apply(d, rows, today=None):
         if snooze and str(snooze) > today and status not in ("watched", "dismissed"):
             snoozed.add(tid)
 
-    hide = watched | dismissed
+    # A snooze hides for the pipeline consumers too; the pools are rebuilt
+    # twice a day, so an expired snooze comes back on the next run.
+    hide = watched | dismissed | snoozed
     pruned = 0
 
-    def keep(films, also=frozenset()):
+    def keep(films):
         nonlocal pruned
-        out = [f for f in films if f.get("tmdb_id") not in hide and f.get("tmdb_id") not in also]
+        out = [f for f in films if f.get("tmdb_id") not in hide]
         pruned += len(films) - len(out)
         return out
 
@@ -114,15 +132,37 @@ def apply(d, rows, today=None):
             for mood, picks in d["mood_picks"].items()
         }
     if d.get("slates"):
-        # a snooze is "not tonight", so it only affects the slate window
-        d["slates"] = [{**s, "focus": keep(s.get("focus", []), snoozed)} for s in d["slates"]]
-    if d.get("todays_pick") and d["todays_pick"].get("tmdb_id") in (hide | snoozed):
+        d["slates"] = [{**s, "focus": keep(s.get("focus", []))} for s in d["slates"]]
+    if d.get("todays_pick") and d["todays_pick"].get("tmdb_id") in hide:
         pool = (d.get("slates") or [{}])[0].get("focus") or d.get("queue") or []
         if pool:
             d["todays_pick"] = pool[0]
 
     if watched:
-        d["watched_tmdb_set"] = sorted(set(d.get("watched_tmdb_set") or []) | watched)
+        seen = set(d.get("watched_tmdb_set") or []) | watched
+        d["watched_tmdb_set"] = sorted(seen)
+        # The canon / collection / director checklists carry baked `seen`
+        # flags computed before this ran; re-derive them so a film marked
+        # Watched in the app reads as seen everywhere, not just in the queue.
+
+        def mark_seen(o):
+            if isinstance(o, dict):
+                if isinstance(o.get("tmdb_id"), int) and "seen" in o:
+                    o["seen"] = o["tmdb_id"] in seen
+                for v in o.values():
+                    mark_seen(v)
+            elif isinstance(o, list):
+                for v in o:
+                    mark_seen(v)
+        for key in ("canon", "collections", "screenplays", "themed_weeks",
+                    "directors", "director_targets", "craft_dimensions"):
+            if key in d:
+                mark_seen(d[key])
+        for meta in d.get("collections_meta") or []:
+            films = (d.get("collections") or {}).get(meta.get("key")) or []
+            if films:
+                n_seen = sum(1 for f in films if f.get("seen"))
+                meta.update({"total": len(films), "seen": n_seen, "unseen": len(films) - n_seen})
 
     # shortlist: full objects where a pool still carries the film
     index = {}
@@ -137,7 +177,7 @@ def apply(d, rows, today=None):
             index.setdefault(f.get("tmdb_id"), f)
     out = []
     for _, tid, r in sorted(shortlist, reverse=True):
-        if tid in hide or tid in snoozed:
+        if tid in hide:
             continue
         f = index.get(tid) or film_from_row(r)
         if f:

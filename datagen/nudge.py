@@ -57,10 +57,20 @@ LIST_NAME = "Cineprompt — Tonight"   # the MDBList list that shows up as a Str
 # ---------------------------------------------------------------- dates ----
 
 def today():
+    """The user's calendar day. The evening runs fire after UTC midnight, so
+    the runner's date is a day ahead: weeknight rules would fire on Saturday
+    and a watch logged "today" could never match. NUDGE_TZ overrides the zone."""
     override = os.environ.get("NUDGE_TODAY", "").strip()
     if override:
         return date.fromisoformat(override)
-    return date.today()
+    tz = os.environ.get("NUDGE_TZ") or os.environ.get("USER_TZ") or "America/Chicago"
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        return datetime.now(ZoneInfo(tz)).date()
+    except Exception:
+        print(f"nudge: timezone {tz!r} unavailable, using the UTC date")
+        return date.today()
 
 
 def parse_day(value):
