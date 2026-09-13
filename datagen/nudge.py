@@ -27,6 +27,15 @@ Modes (NUDGE_MODE):
   evening   the main nudge: three picks, poster, buttons
   followup  later the same night, one easy pick, and only if nothing was
             logged today; silent otherwise
+  log       right after a watch (IFTTT fires it off a Trakt scrobble): just
+            "X — watched, not logged" with the Log button, and nothing at
+            all when the diary already has it
+
+Never twice. A small log (datagen/.nudge_log.json, kept across CI runs)
+records what went out: the evening and follow-up nudges at most once per
+calendar day, the log prompt at most once per watch. The GitHub cron and
+the IFTTT applet can both fire the same nudge and the first one wins.
+NUDGE_FORCE=1 bypasses that for a test send.
 
 Silent no-op when NTFY_TOPIC is unset, so the deploy never depends on it.
 
@@ -34,7 +43,9 @@ Usage:  python datagen/nudge.py client/public/data.json
 Env:    NTFY_TOPIC    required to actually send
         NTFY_SERVER   default https://ntfy.sh
         SITE_URL      default https://cineprompt.pages.dev
-        NUDGE_MODE    evening (default) | followup
+        NUDGE_MODE    evening (default) | followup | log
+        NUDGE_FORCE   set to 1 to send even if the nudge log says it went out
+        NUDGE_LOG     path of the sent-nudge log (default datagen/.nudge_log.json)
         STREMIO_WEB   set to 1 to link web.stremio.com instead of the app scheme
         NUDGE_TODAY   YYYY-MM-DD, overrides today (testing)
 """
@@ -56,6 +67,51 @@ LONG_MIN = 150      # minutes: weekend material
 TMDB_IMG = "https://image.tmdb.org/t/p"
 IMDB_RE = re.compile(r"tt\d{5,9}")
 LIST_NAME = "Cineprompt — Tonight"   # the MDBList list that shows up as a Stremio row
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".nudge_log.json")
+LOG_KEEP_DAYS = 30  # entries older than this are dropped from the sent log
+
+
+# ------------------------------------------------------------ sent log ----
+
+def log_path():
+    return os.environ.get("NUDGE_LOG") or LOG_PATH
+
+
+def load_log():
+    """{"evening": "YYYY-MM-DD", "followup": "YYYY-MM-DD", "log": {"<tmdb>": "<watched_at>"}}"""
+    try:
+        with open(log_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_log(log, day):
+    """Write the sent log, dropping per-watch entries older than LOG_KEEP_DAYS."""
+    keep = (day - timedelta(days=LOG_KEEP_DAYS)).isoformat()
+    log["log"] = {k: v for k, v in (log.get("log") or {}).items() if str(v) >= keep}
+    try:
+        with open(log_path(), "w", encoding="utf-8") as fh:
+            json.dump(log, fh, indent=2, sort_keys=True)
+    except OSError as err:  # a log we cannot write must not cost the nudge
+        print(f"nudge: could not write {log_path()}: {err}")
+
+
+def already_sent(log, mode, day, key=None):
+    """True when this nudge already went out: today, for evening/followup;
+    for this watch, in log mode (key = "<tmdb>:<watched_at>")."""
+    if mode == "log":
+        return bool(key) and key in (log.get("log") or {})
+    return log.get(mode) == day.isoformat()
+
+
+def record(log, mode, day, key=None):
+    if mode == "log":
+        if key:
+            log.setdefault("log", {})[key] = key.split(":", 1)[-1]
+    else:
+        log[mode] = day.isoformat()
 
 
 # ---------------------------------------------------------------- dates ----
@@ -100,6 +156,8 @@ def unlogged_watches(data, day):
     out = []
     for u in data.get("unlogged") or []:
         when = parse_day(u.get("watched_at"))
+        if when and when > day:
+            when = day                       # a UTC-dated evening watch: it was today
         if when and 0 <= (day - when).days <= UNLOGGED_REMIND_DAYS and u.get("letterboxd_url"):
             out.append({**u, "_day": when})
     out.sort(key=lambda u: u["_day"], reverse=True)
@@ -275,9 +333,49 @@ def actions_for(picks, web, unlogged=None):
 
 # ------------------------------------------------------------- compose -----
 
-def compose(data, day, mode, web):
+def unlogged_poster(u, size="w500"):
+    poster = u.get("poster")
+    if isinstance(poster, str) and poster.startswith("http"):
+        return poster
+    return poster_url(u, size)
+
+
+def log_key(u):
+    return f"{u.get('tmdb')}:{u['_day'].isoformat()}"
+
+
+def compose_log(unlogged, day, sent_log=None):
+    """The after-the-credits prompt: one film, one button, or nothing.
+    Yesterday counts too — a late show scrobbles after midnight. Films already
+    prompted are passed over, so a double feature gets both its prompts, one
+    per run, instead of the newest one blocking the other."""
+    fresh = [u for u in unlogged if 0 <= (day - u["_day"]).days <= 1]
+    if not fresh:
+        return None, "nothing watched since yesterday that isn't in the diary"
+    todo = [u for u in fresh if not already_sent(sent_log or {}, "log", day, log_key(u))]
+    if not todo:
+        return None, f"already prompted for {', '.join(u['title'] for u in fresh)} (NUDGE_FORCE=1 overrides)"
+    u = todo[0]
+    source = "It's on Trakt" if u.get("source") == "trakt" else "You marked it watched"
+    payload = {
+        "title": f"{u['title']} — watched, not logged",
+        "message": f"{source} but not in your Letterboxd diary. Log it while it's fresh.",
+        "priority": 4, "tags": ["pencil"], "click": u["letterboxd_url"],
+        "actions": [log_action(u)],
+        "_key": log_key(u),
+    }
+    poster = unlogged_poster(u)
+    if poster:
+        payload["attach"] = poster
+        payload["icon"] = unlogged_poster(u, "w185")
+    return payload, None
+
+
+def compose(data, day, mode, web, sent_log=None):
     quiet, last, today_titles, streak = watch_stats(data, day)
     unlogged = unlogged_watches(data, day)
+    if mode == "log":
+        return compose_log(unlogged, day, sent_log)
     unlogged_today = [u for u in unlogged if u["_day"] == day]
     pool = candidate_pool(data)
     if not pool:
@@ -396,9 +494,17 @@ def main():
     web = (os.environ.get("STREMIO_WEB") or "").strip().lower() in ("1", "true", "yes")
     day = today()
 
-    payload, skipped = compose(data, day, mode, web)
+    sent_log = load_log()
+    force = (os.environ.get("NUDGE_FORCE") or "").strip().lower() in ("1", "true", "yes")
+    payload, skipped = compose(data, day, mode, web, {} if force else sent_log)
     if payload is None:
         print(f"nudge [{mode}] {day:%a %Y-%m-%d}: skipped — {skipped}")
+        return 0
+    key = payload.pop("_key", None)
+
+    if already_sent(sent_log, mode, day, key) and not force:
+        what = f"the log prompt for {key}" if mode == "log" else f"the {mode} nudge"
+        print(f"nudge [{mode}] {day:%a %Y-%m-%d}: skipped — {what} already went out (NUDGE_FORCE=1 overrides)")
         return 0
 
     print(f"nudge [{mode}] {day:%a %Y-%m-%d}\n--- {payload['title']} ---\n{payload['message']}\n")
@@ -422,6 +528,8 @@ def main():
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             print(f"nudge: sent to {server} (HTTP {response.status})")
+        record(sent_log, mode, day, key)
+        save_log(sent_log, day)
     except urllib.error.HTTPError as err:
         print(f"nudge: FAILED — HTTP {err.code} from {server}: {err.read()[:200]!r}")
         return 1

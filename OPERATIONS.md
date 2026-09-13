@@ -9,6 +9,8 @@ A private film dashboard at **https://cineprompt.pages.dev** that:
 - shows unseen films worth watching (canon, your favorite directors, your blind spots)
   plus a few comfort rewatches for background,
 - **updates itself twice a day** from your Letterboxd diary (Trakt too, if configured),
+- with IFTTT wired in, **asks you to log a film minutes after the credits** when Trakt
+  saw it and your Letterboxd diary didn't (DEPLOY.md, "Right after the credits"),
 - is locked so only **daltino1@gmail.com** can open it.
 
 ## Where everything lives (so nothing can be "lost")

@@ -79,6 +79,11 @@ per film, a **Log it on Letterboxd** link the moment you mark a film watched, a
 too, instead of staying silent). Once you log it, the next run's RSS pass sees
 the entry and the prompt clears itself.
 
+With IFTTT wired in (see [DEPLOY.md](DEPLOY.md#right-after-the-credits-and-on-the-minute-ifttt)),
+a Trakt scrobble starts the pipeline itself, so that prompt lands on the phone
+minutes after the credits rather than at the next scheduled run, and the timed
+runs fire on the minute instead of whenever GitHub gets to them.
+
 Levels of refresh, lightest to heaviest:
 
 - **Roll the daily slate** — no API keys, instant. Reuses the films already in

@@ -6,3 +6,4 @@ __pycache__/
 .letterboxd_profile.json.tmp
 letterboxd-export.zip
 letterboxd-export/
+.nudge_log.json
