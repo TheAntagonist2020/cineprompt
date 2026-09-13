@@ -9,6 +9,7 @@ import {
   formatRuntime,
   languageName,
   tmdbUrl,
+  letterboxdLogUrl,
   stripHtml,
   type QueueFilm,
   type BackgroundFilm,
@@ -376,6 +377,20 @@ export function FilmActions({
           icon={<RotateCcw className="h-3.5 w-3.5" />}
           label="Undo"
         />
+      )}
+      {watched && (
+        // A watch here is not a diary entry there. Prompt for the entry the
+        // moment it happens, with the Letterboxd page one tap away.
+        <a
+          href={letterboxdLogUrl(id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid={`action-log-${id}`}
+          className="inline-flex items-center gap-1.5 border border-primary/40 bg-primary/10 px-3 py-2 font-sans text-sm font-medium tracking-wide rounded-sm text-primary hover:bg-primary/20 transition-colors"
+          title="Open the film on Letterboxd and tap Log"
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> Log it on Letterboxd
+        </a>
       )}
     </div>
   );

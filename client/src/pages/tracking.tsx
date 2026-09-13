@@ -66,6 +66,8 @@ export default function Tracking() {
   );
 
   const posterIdx = getPosterIndex(data);
+  // watches with no diary entry: the row offers "Log it" instead of "Diary"
+  const unlogged = new Map((data.unlogged ?? []).map((u) => [u.tmdb, u]));
 
   return (
     <PageShell
@@ -192,7 +194,8 @@ export default function Tracking() {
         <ol className="divide-y divide-border border-t border-border">
           {data.recent_watches.map((w, i) => {
             const poster = w.poster ?? posterIdx.get(w.tmdb) ?? null;
-            const href = diaryUrl(data.user?.letterboxd, w);
+            const missing = unlogged.get(w.tmdb);
+            const href = missing ? missing.letterboxd_url : diaryUrl(data.user?.letterboxd, w);
             return (
               <li key={`${w.tmdb}-${i}`} className="py-3.5 flex items-center gap-4" data-testid={`watch-${w.tmdb}`}>
                 <span className="font-mono text-[11px] text-muted-foreground w-[88px] shrink-0 tabular-nums">
@@ -205,7 +208,7 @@ export default function Tracking() {
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  title={w.uri ? "Open your diary entry on Letterboxd" : "Open your diary for this day on Letterboxd"}
+                  title={missing ? "Watched but not in your Letterboxd diary — open the film to log it" : w.uri ? "Open your diary entry on Letterboxd" : "Open your diary for this day on Letterboxd"}
                   data-testid={`watch-diary-${w.tmdb}`}
                   className="font-serif text-lg text-foreground hover:text-primary transition-colors min-w-0 truncate"
                 >
@@ -227,10 +230,15 @@ export default function Tracking() {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label="Open on Letterboxd"
-                    className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-primary transition-colors"
+                    aria-label={missing ? "Log on Letterboxd" : "Open on Letterboxd"}
+                    data-testid={missing ? `watch-log-${w.tmdb}` : undefined}
+                    className={`inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] transition-colors ${
+                      missing
+                        ? "text-primary border border-primary/40 rounded-sm px-1.5 py-0.5 hover:bg-primary/10"
+                        : "text-muted-foreground hover:text-primary"
+                    }`}
                   >
-                    Diary <ExternalLink className="h-2.5 w-2.5" />
+                    {missing ? "Log it" : "Diary"} <ExternalLink className="h-2.5 w-2.5" />
                   </a>
                 </span>
               </li>

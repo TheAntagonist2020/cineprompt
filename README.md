@@ -68,6 +68,17 @@ a bot challenge, so the pipeline deliberately never scrapes it.
 Trakt, if configured, is layered on top: its watched set is unioned in, its
 ratings fill gaps Letterboxd hasn't rated. Where both rate a film, Letterboxd wins.
 
+**A watch is not a diary entry.** A Trakt scrobble, or tapping **Watched** in
+the app, records that you saw something — it does not write your diary. The
+pipeline lists every recent watch that has no Letterboxd entry within two days
+of it (`unlogged`), and the app prompts for the entry everywhere it matters:
+a "Watched, not in your diary" box at the top of Today with a **Log it** button
+per film, a **Log it on Letterboxd** link the moment you mark a film watched, a
+**Log it** badge on the Tracking rows, and the phone nudge leads with
+"*watched, not logged*" and a Log button (the 9pm follow-up sends that reminder
+too, instead of staying silent). Once you log it, the next run's RSS pass sees
+the entry and the prompt clears itself.
+
 Levels of refresh, lightest to heaviest:
 
 - **Roll the daily slate** — no API keys, instant. Reuses the films already in

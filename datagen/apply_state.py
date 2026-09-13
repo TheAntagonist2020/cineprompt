@@ -18,6 +18,8 @@ What it does to data.json:
   * shortlist -> `shortlist`: full film objects (from the pools, or rebuilt
                  from the stored snapshot), newest first. The nudge and the
                  Stremio row lead with these.
+  * watched (in-app) with no matching Letterboxd diary entry -> added to
+    `unlogged`, so Today and the nudge prompt for the diary entry.
 
 Usage:
     python apply_state.py <data.json> <state.json>
@@ -25,7 +27,10 @@ Usage:
 import json
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
+
+UNLOGGED_DAYS = 14   # keep prompting for a diary entry this long
+LOG_LAG_DAYS = 2     # a diary entry within this many days of the watch counts
 
 # The app writes snooze dates from the phone's calendar; the runner's clock is
 # UTC and the evening runs fire after UTC midnight. Compare on the user's day.
@@ -184,6 +189,48 @@ def apply(d, rows, today=None):
         if f:
             out.append(f)
     d["shortlist"] = out
+
+    # A film marked Watched in the app is a watch that exists nowhere else.
+    # Until the diary has it, keep prompting for the entry.
+    diary_days = {}
+    for row_ in ((d.get("letterboxd_profile") or {}).get("diary") or []):
+        try:
+            day_, tid_ = row_[0], row_[3]
+        except (IndexError, TypeError):
+            continue
+        if tid_:
+            diary_days.setdefault(int(tid_), set()).add(str(day_)[:10])
+    unlogged = list(d.get("unlogged") or [])
+    have = {u.get("tmdb") for u in unlogged}
+    cutoff = (datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=UNLOGGED_DAYS)).isoformat()
+    for r in rows:
+        if r.get("status") != "watched":
+            continue
+        try:
+            tid = int(r.get("tmdb_id"))
+            ts = float(r.get("updated_at") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts > 1e11:
+            ts /= 1000.0                       # revisions are milliseconds
+        day = datetime.fromtimestamp(ts, timezone.utc).date().isoformat() if ts else today
+        if day < cutoff or tid in have:
+            continue
+        d0 = datetime.strptime(day, "%Y-%m-%d").date()
+        logged = any(abs((datetime.strptime(x, "%Y-%m-%d").date() - d0).days) <= LOG_LAG_DAYS
+                     for x in diary_days.get(tid, ()))
+        if logged:
+            continue
+        f = index.get(tid) or film_from_row(r) or {}
+        unlogged.append({
+            "tmdb": tid, "title": f.get("title") or r.get("title") or f"TMDB {tid}",
+            "year": f.get("year") or r.get("year") or 0, "watched_at": day,
+            "poster": f.get("poster") or r.get("poster"),
+            "letterboxd_url": f"https://letterboxd.com/tmdb/{tid}/", "source": "app",
+        })
+        have.add(tid)
+    unlogged.sort(key=lambda u: u.get("watched_at") or "", reverse=True)
+    d["unlogged"] = unlogged
     d["state_applied_at"] = today
     return {"watched": len(watched), "dismissed": len(dismissed), "snoozed": len(snoozed),
             "shortlist": len(out), "pruned": pruned}
