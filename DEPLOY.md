@@ -144,8 +144,60 @@ If you logged a film today, the evening message says so and eases off instead of
 piling on, and keeps count of your streak. `Run workflow` sends the main nudge on
 demand.
 
-Times are UTC crons, so they drift an hour when clocks change; adjust the two
-evening crons in `.github/workflows/update.yml` if that bothers you.
+Times are UTC crons, so they drift an hour when clocks change, and GitHub
+runs its schedules late when it is busy (40 minutes is common in the evening).
+The IFTTT applets below fix both; the crons stay on as a backup.
+
+### Right after the credits, and on the minute (IFTTT)
+
+Two things GitHub's schedule cannot do: react to a watch the moment it
+happens, and fire at an exact time. An [IFTTT](https://ifttt.com) Pro account
+does both with no server of your own, by starting the same workflow through
+GitHub's API. The workflow's `reason` input tells the run why it fired:
+
+| `reason` | What the run does | Who fires it |
+| --- | --- | --- |
+| `watched` | refresh, redeploy, then **only** the "*X — watched, not logged*" prompt with a Log button; silent if the diary already has it | IFTTT, off Trakt's **New watched movie** (a Plex/Stremio scrobble) |
+| `evening` | refresh, redeploy, the main nudge | IFTTT, every day at 7:30pm |
+| `followup` | refresh, redeploy, the quiet follow-up | IFTTT, every day at 9:00pm |
+| `morning` | refresh, redeploy, no nudge | IFTTT, every day at 8:15am |
+| `manual` (default) | refresh, redeploy, the main nudge | you, **Run workflow** |
+
+**Never twice.** `nudge.py` keeps a small log across runs
+(`datagen/.nudge_log.json`, cached with the Letterboxd profile): the evening
+and follow-up nudges go out at most once per calendar day, the diary prompt
+at most once per watch. So the GitHub cron and the IFTTT applet can both
+fire and the first one wins; a `Run workflow` after 7:30pm does not re-send
+unless you tick **force_nudge**.
+
+Set it up:
+
+1. **A GitHub token for IFTTT.** GitHub → Settings → Developer settings →
+   Personal access tokens → **Fine-grained tokens → Generate new token**.
+   Repository access: **only `cineprompt`**. Permissions: **Actions → Read and
+   write** (nothing else). Set the longest expiry you are comfortable with and
+   copy it once.
+2. **Four applets**, each a Webhooks **Make a web request** action:
+   - URL `https://api.github.com/repos/TheAntagonist2020/cineprompt/actions/workflows/update.yml/dispatches`
+   - Method `POST`, content type `application/json`
+   - Additional headers (one per line):
+     ```
+     Authorization: Bearer <your token>
+     Accept: application/vnd.github+json
+     X-GitHub-Api-Version: 2022-11-28
+     ```
+   - Body `{"ref":"main","inputs":{"reason":"watched"}}` — with `evening`,
+     `followup` or `morning` in place of `watched` for the three timed ones.
+   - Triggers: **Trakt → New watched movie** for `watched`; **Date & Time →
+     Every day at** 7:30pm / 9:00pm / 8:15am for the other three (IFTTT uses
+     your account's time zone, so no UTC arithmetic).
+3. Watch something that scrobbles to Trakt. A few minutes later (IFTTT polls
+   Trakt, it is not instant) your phone says *watched, not logged* with a
+   Log button; the app's Today shows the same box. Log it and the next run
+   clears the prompt.
+
+The token lives only in IFTTT's applet fields. If it leaks, the worst it can
+do is start this one workflow; revoke it under the same GitHub page.
 
 ### Tap straight into Stremio
 

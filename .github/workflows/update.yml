@@ -3,7 +3,11 @@ name: Update & Deploy Cineprompt
 # Keeps the live site current with what you've watched, with no manual steps:
 #   - on a schedule: fold in the Letterboxd diary -> rebuild the unseen-picks
 #     engine (Trakt layered on top if configured) -> apply in-app choices -> deploy
-#   - on manual "Run workflow": same (force a refresh on demand)
+#   - on manual "Run workflow": same (force a refresh on demand). The `reason`
+#     input is how IFTTT drives it (see DEPLOY.md): a Trakt scrobble fires
+#     `watched` (rebuild, then only the "log it on Letterboxd" prompt), and
+#     timed applets fire `morning` / `evening` / `followup` on the minute,
+#     which the crons below cannot promise.
 #   - on push to main: redeploy code changes (no API rebuild)
 on:
   schedule:
@@ -11,7 +15,17 @@ on:
     - cron: "17 13 * * *"   # ~morning CT (08:17 CDT / 07:17 CST): refresh only, no nudge
     - cron: "30 0 * * *"    # ~evening CT (19:30 CDT / 18:30 CST): refresh + the nudge
     - cron: "0 2 * * *"     # ~late CT (21:00 CDT / 20:00 CST): follow-up, only if nothing logged today
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this run fires (decides the phone nudge)"
+        type: choice
+        default: manual
+        options: [manual, morning, evening, followup, watched]
+      force_nudge:
+        description: "Send the nudge even if this one already went out today"
+        type: boolean
+        default: false
   push:
     branches: [main]
 
@@ -78,11 +92,15 @@ jobs:
       # the source of truth for taste and for "seen". Same rotating-key
       # pattern. Losing it is not fatal (it re-bootstraps from data.json and
       # re-resolves against the TMDB cache) but it would forget diary entries
-      # older than the RSS window, so it is kept.
+      # older than the RSS window, so it is kept. The nudge log rides along:
+      # it is how a run knows tonight's nudge already went out (the GitHub
+      # cron and the IFTTT applet both fire; the first one wins).
       - name: Restore Letterboxd profile
         uses: actions/cache@v6
         with:
-          path: datagen/.letterboxd_profile.json
+          path: |
+            datagen/.letterboxd_profile.json
+            datagen/.nudge_log.json
           key: letterboxd-profile-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             letterboxd-profile-${{ runner.os }}-
@@ -249,20 +267,30 @@ jobs:
       # ---- The push half -------------------------------------------------
       # Everything above updates the site and waits for you to visit it. This
       # sends the picks to your phone so the site doesn't have to be visited
-      # at all. Evening run + manual dispatch only: a nudge at 08:17 is noise.
-      # Runs after the deploy and is non-fatal, so it can never cost a deploy.
+      # at all. Evening run, follow-up, and dispatches other than `morning`:
+      # a nudge at 08:17 is noise. A `watched` dispatch (IFTTT, right after a
+      # Trakt scrobble) sends only the "log it on Letterboxd" prompt, and
+      # nothing when the diary already has it. nudge.py keeps a log so the
+      # same nudge never goes out twice in a day, whichever trigger got
+      # there first. Runs after the deploy and is non-fatal, so it can never
+      # cost a deploy.
       - name: Nudge me to watch something
         id: nudge
         if: >-
-          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.reason != 'morning') ||
           github.event.schedule == '30 0 * * *' ||
           github.event.schedule == '0 2 * * *'
         continue-on-error: true
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
-          # the 9pm run is the quiet follow-up; everything else is the main nudge
-          NUDGE_MODE: ${{ github.event.schedule == '0 2 * * *' && 'followup' || 'evening' }}
+          # 9pm cron / `followup` -> the quiet follow-up; `watched` -> the diary
+          # prompt only; everything else (evening cron, manual, `evening`) -> main nudge
+          NUDGE_MODE: >-
+            ${{ (github.event.schedule == '0 2 * * *' || github.event.inputs.reason == 'followup') && 'followup'
+                || github.event.inputs.reason == 'watched' && 'log'
+                || 'evening' }}
+          NUDGE_FORCE: ${{ github.event.inputs.force_nudge == 'true' && '1' || '' }}
           # repo variable (Settings -> Variables): set to 1 to use web.stremio.com links
           STREMIO_WEB: ${{ vars.STREMIO_WEB }}
           # the nudge's day is your calendar day, not the runner's UTC date
@@ -289,7 +317,7 @@ jobs:
             echo "| Phone nudge | ${{ steps.nudge.outcome || 'skipped' }} |"
             echo "| data.json source | ${{ steps.fresher.outputs.source || 'n/a' }} |"
             echo
-            echo "Trigger: \`${{ github.event_name }}\` ${{ github.event.schedule }}"
+            echo "Trigger: \`${{ github.event_name }}\` ${{ github.event.schedule }} ${{ github.event.inputs.reason }}"
             echo
             echo "\`generated_at\` in the deployed payload:"
             echo
