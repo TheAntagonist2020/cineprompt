@@ -353,6 +353,18 @@ export interface AppData {
   // in-app state applied by the pipeline (datagen/apply_state.py), if it ran
   state_applied_at?: string;
   shortlist?: QueueFilm[];
+  /** watches that exist (Trakt scrobble, in-app Watched) but not in your Letterboxd diary */
+  unlogged?: UnloggedWatch[];
+}
+
+export interface UnloggedWatch {
+  tmdb: number;
+  title: string;
+  year: number | string;
+  watched_at: string; // YYYY-MM-DD
+  poster?: string | null;
+  letterboxd_url: string;
+  source: "trakt" | "app";
 }
 
 /**
@@ -715,6 +727,11 @@ export function tmdbUrl(tmdb_id: number | null | undefined, title?: string): str
 }
 export function letterboxdTmdbUrl(tmdb_id: number): string {
   return `https://letterboxd.com/tmdb/${tmdb_id}/`;
+}
+
+/** The film on Letterboxd, where the Log button is — the diary entry starts here. */
+export function letterboxdLogUrl(tmdb_id: number): string {
+  return letterboxdTmdbUrl(tmdb_id);
 }
 
 /**

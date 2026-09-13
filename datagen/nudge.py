@@ -18,6 +18,10 @@ What it does that a plain "top of the queue" would not:
   * Knows when you already watched something today, and eases off instead of
     piling on. Counts a streak and says so.
   * Escalates the longer you have been quiet.
+  * Knows the difference between a watch and a diary entry. A Trakt scrobble
+    or an in-app "Watched" that never reached Letterboxd is "unlogged": the
+    message says so and the first button opens the film on Letterboxd to log
+    it. The follow-up, otherwise silent after a watch, sends that reminder.
 
 Modes (NUDGE_MODE):
   evening   the main nudge: three picks, poster, buttons
@@ -85,6 +89,27 @@ def parse_day(value):
 
 def is_weekend(day):
     return day.weekday() in (4, 5)   # Friday, Saturday nights
+
+
+UNLOGGED_REMIND_DAYS = 7   # keep nagging about a missing diary entry this long
+
+
+def unlogged_watches(data, day):
+    """Recent watches with no Letterboxd diary entry, newest first (from the
+    pipeline's `unlogged`, see build_recommendations.find_unlogged)."""
+    out = []
+    for u in data.get("unlogged") or []:
+        when = parse_day(u.get("watched_at"))
+        if when and 0 <= (day - when).days <= UNLOGGED_REMIND_DAYS and u.get("letterboxd_url"):
+            out.append({**u, "_day": when})
+    out.sort(key=lambda u: u["_day"], reverse=True)
+    return out
+
+
+def log_action(u):
+    title = u.get("title") or "it"
+    return {"action": "view", "url": u["letterboxd_url"], "clear": True,
+            "label": "✎ Log " + (title if len(title) <= 18 else title[:17].rstrip() + "…")}
 
 
 def watch_stats(data, day):
@@ -235,9 +260,13 @@ def button_label(film):
     return "▶ " + (title if len(title) <= 22 else title[:21].rstrip() + "…")
 
 
-def actions_for(picks, web):
+def actions_for(picks, web, unlogged=None):
     out = []
+    if unlogged:                              # the diary entry comes first
+        out.append(log_action(unlogged[0]))
     for film in picks[:3]:                    # ntfy allows at most three actions
+        if len(out) >= 3:
+            break
         url = stremio_url(film, web)
         if url:
             out.append({"action": "view", "label": button_label(film), "url": url, "clear": True})
@@ -248,6 +277,8 @@ def actions_for(picks, web):
 
 def compose(data, day, mode, web):
     quiet, last, today_titles, streak = watch_stats(data, day)
+    unlogged = unlogged_watches(data, day)
+    unlogged_today = [u for u in unlogged if u["_day"] == day]
     pool = candidate_pool(data)
     if not pool:
         return None, "no picks available in data.json"
@@ -256,6 +287,17 @@ def compose(data, day, mode, web):
         return None, "nothing survived the runtime rules"
 
     if mode == "followup":
+        if quiet == 0 and unlogged_today:
+            # you watched something and it is still not in the diary: the one
+            # reminder that is worth sending after a watch
+            u = unlogged_today[0]
+            payload = {
+                "title": f"{u['title']} isn't in your diary yet",
+                "message": "Watched today, not logged on Letterboxd. Tap to log it.",
+                "priority": 3, "tags": ["pencil"], "click": u["letterboxd_url"],
+                "actions": [log_action(u)],
+            }
+            return payload, None
         if quiet == 0:
             return None, f"already logged {today_titles[0]} today, no follow-up"
         title, opener, priority, tags = (
@@ -263,6 +305,13 @@ def compose(data, day, mode, web):
             "Easiest one for right now:",
             3,
             ["clapper"],
+        )
+    elif quiet == 0 and unlogged_today:
+        title, opener, priority, tags = (
+            f"{unlogged_today[0]['title']} — watched, not logged",
+            "It's on Trakt but not in your Letterboxd diary. Log it, then if you're going again:",
+            3,
+            ["pencil"],
         )
     elif quiet == 0:
         title, opener, priority, tags = (
@@ -314,6 +363,10 @@ def compose(data, day, mode, web):
         lines += ["", f"🔥 {streak}-day streak" + (". Don't break it tonight." if quiet == 1 else ".")]
     if is_weekend(day) and mode != "followup":
         lines += ["", "Weekend. There's room for the long one."]
+    older = [u for u in unlogged if u["_day"] != day]
+    if older:
+        lines += ["", "✎ Not in your diary yet: " + ", ".join(
+            f"{u['title']} ({u['_day']:%a})" for u in older[:3])]
     lines += ["", f"Also in Stremio: the “{LIST_NAME}” row."]
 
     payload = {
@@ -321,8 +374,9 @@ def compose(data, day, mode, web):
         "message": "\n".join(lines),
         "priority": priority,
         "tags": tags,
-        "click": stremio_url(picks[0], web) or SITE_URL,
-        "actions": actions_for(picks, web),
+        "click": (unlogged_today[0]["letterboxd_url"] if unlogged_today
+                  else stremio_url(picks[0], web) or SITE_URL),
+        "actions": actions_for(picks, web, unlogged),
     }
     poster = poster_url(picks[0])
     if poster:

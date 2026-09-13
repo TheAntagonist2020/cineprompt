@@ -78,6 +78,8 @@ GENRE_NOISE = {"Drama"}   # on nearly every film, so it says nothing about a run
 NEW_VOTE_FLOOR = 60       # a release from the last 18 months has few votes yet
 NEW_VOTE_AVG = 5.8
 NEW_RELEASE_MONTHS = 18
+UNLOGGED_DAYS = 14        # how far back to look for watches that never reached the diary
+LOG_LAG_DAYS = 2          # a diary entry dated within this many days of the watch counts
 
 # world-cinema languages worth surfacing if you rarely watch them
 WORLD_LANGS = ["ja", "fr", "it", "ko", "de", "es", "ru", "sv",
@@ -296,15 +298,25 @@ def pull_profile(base):
     for tid, ty in lp.ty_of(profile).items():
         ty_of.setdefault(tid, ty)
 
+    # Which days the Letterboxd diary has for each film. A scrobble is not a
+    # log: anything Trakt saw that the diary doesn't have is "unlogged" and
+    # the app's job is to prompt for the entry, not to pretend it exists.
+    lb_dates = defaultdict(set)
+    for h in lb_hist:
+        tid = ((h.get("movie") or {}).get("ids") or {}).get("tmdb")
+        if tid:
+            lb_dates[tid].add(h["watched_at"][:10])
+
     seen_days, history = set(), []
-    for h in (tr["history"] if tr else []) + lb_hist:
-        m = h.get("movie") or {}
-        tid = (m.get("ids") or {}).get("tmdb")
-        day = (h.get("watched_at") or "")[:10]
-        if not tid or not day or (tid, day) in seen_days:
-            continue
-        seen_days.add((tid, day))
-        history.append(h)
+    for src, rows in (("letterboxd", lb_hist), ("trakt", tr["history"] if tr else [])):
+        for h in rows:
+            m = h.get("movie") or {}
+            tid = (m.get("ids") or {}).get("tmdb")
+            day = (h.get("watched_at") or "")[:10]
+            if not tid or not day or (tid, day) in seen_days:
+                continue
+            seen_days.add((tid, day))
+            history.append({**h, "source": src})
     history.sort(key=lambda h: h.get("watched_at") or "", reverse=True)
 
     print(f"Profile: {len(watched)} seen, {len(rating_of)} rated, {len(history)} dated watches"
@@ -313,8 +325,48 @@ def pull_profile(base):
         "watched_ids": watched, "play_of": play_of, "last_of": last_of,
         "ty_of": ty_of, "rating_of": rating_of, "history": history,
         "uri_of": lp.uri_of(profile), "poster_of": lp.poster_of(profile),
+        "lb_dates": dict(lb_dates),
         "stats": tr["stats"] if tr else {}, "sources": ["letterboxd"] + (["trakt"] if tr else []),
     }
+
+
+def find_unlogged(prof, tmdb, today=None):
+    """Recent watches that exist somewhere (a Trakt scrobble) but not in the
+    Letterboxd diary, newest first, one row per film. A diary entry within
+    LOG_LAG_DAYS of the scrobble counts as logged (people log the next
+    morning). Each row carries the Letterboxd page to log it from."""
+    today = today or datetime.now().date()
+    cutoff = (today - timedelta(days=UNLOGGED_DAYS)).isoformat()
+    lb_dates = prof.get("lb_dates") or {}
+    out, seen = [], set()
+    for h in prof["history"]:
+        day = (h.get("watched_at") or "")[:10]
+        if day < cutoff:
+            break                                   # history is newest-first
+        if h.get("source") != "trakt":
+            continue
+        m = h.get("movie") or {}
+        tid = (m.get("ids") or {}).get("tmdb")
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        try:
+            d0 = datetime.strptime(day, "%Y-%m-%d").date()
+            logged = any(abs((datetime.strptime(x, "%Y-%m-%d").date() - d0).days) <= LOG_LAG_DAYS
+                         for x in lb_dates.get(tid, ()))
+        except ValueError:
+            logged = False
+        if logged:
+            continue
+        fm = tmdb.movie(tid) or {}
+        out.append({
+            "tmdb": tid, "title": m.get("title") or fm.get("title"),
+            "year": m.get("year") or fm.get("year") or 0, "watched_at": day,
+            "poster": fm.get("poster") or prof.get("poster_of", {}).get(tid),
+            "letterboxd_url": f"https://letterboxd.com/tmdb/{tid}/",
+            "source": "trakt",
+        })
+    return out
 
 
 # ---------------------------------------------------------------- enrichment
@@ -1102,6 +1154,11 @@ def build(base_path, out_path):
         rv = prof["rating_of"].get(tid)
         w["rating"] = round(rv / 2.0, 1) if rv else None
 
+    unlogged = find_unlogged(prof, tmdb, today)
+    if unlogged:
+        print(f"  unlogged (on Trakt, not in the diary): "
+              + ", ".join(f"{u['title']} ({u['watched_at']})" for u in unlogged[:5]))
+
     dist = Counter(str(v) for v in prof["rating_of"].values() if v)
     movie_stats = (prof["stats"].get("movies", {})
                    if isinstance(prof["stats"], dict) else {})
@@ -1231,7 +1288,7 @@ def build(base_path, out_path):
     d.pop("state_applied_at", None)
     now_iso = datetime.now(timezone.utc).astimezone().isoformat()
     d.update({
-        "taste": taste,
+        "taste": taste, "unlogged": unlogged,
         "stats": stats, "blindspots": blindspots,
         "watched_tmdb_set": sorted(watched), "recent_watches": recent_watches,
         "by_month": by_month, "diary_ratings": {**base.get("diary_ratings", {}), **diary_ratings},

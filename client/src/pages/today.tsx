@@ -13,6 +13,7 @@ import {
   type QueueFilm,
 } from "@/lib/data";
 import { TonightHero } from "@/components/tonight";
+import { UnloggedPrompt } from "@/components/unlogged";
 import {
   Poster,
   FocusCard,
@@ -237,6 +238,8 @@ export default function Today() {
             </p>
           )}
         </header>
+
+        {data.unlogged && data.unlogged.length > 0 && <UnloggedPrompt items={data.unlogged} />}
 
         {tonight && (
           <TonightHero
