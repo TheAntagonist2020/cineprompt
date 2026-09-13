@@ -64,14 +64,17 @@ jobs:
           python-version: "3.12"
 
       # Persist AND update the TMDB metadata cache across runs.
-      # A cache key is immutable, so the key rotates (run_id) to write a fresh
-      # entry every run, while restore-keys pulls the most recent prior copy as
-      # a warm-start seed. First ever run is cold (fetches metadata live).
+      # A cache key is immutable, so the key rotates (run_id + attempt) to
+      # write a fresh entry every run, while restore-keys pulls the most
+      # recent prior copy as a warm-start seed. First ever run is cold
+      # (fetches metadata live). The attempt is in the key because a re-run
+      # of a failed run reuses its run_id: an exact hit skips the save, and
+      # whatever that re-run learned (and sent) would be forgotten.
       - name: Restore TMDB cache
         uses: actions/cache@v6
         with:
           path: datagen/.tmdb_cache.json
-          key: tmdb-cache-${{ runner.os }}-${{ github.run_id }}
+          key: tmdb-cache-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             tmdb-cache-${{ runner.os }}-
 
@@ -84,7 +87,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: client/public/data.json
-          key: data-json-${{ runner.os }}-${{ github.run_id }}
+          key: data-json-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             data-json-${{ runner.os }}-
 
@@ -101,7 +104,7 @@ jobs:
           path: |
             datagen/.letterboxd_profile.json
             datagen/.nudge_log.json
-          key: letterboxd-profile-${{ runner.os }}-${{ github.run_id }}
+          key: letterboxd-profile-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             letterboxd-profile-${{ runner.os }}-
 

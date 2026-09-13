@@ -213,6 +213,36 @@ def lang_name(code):
 
 
 # ---------------------------------------------------------------- Trakt pull
+# Trakt stamps every watch in UTC. An 8pm film in Chicago is 01:00Z tomorrow,
+# so slicing the date off the raw stamp puts evening watches on the wrong
+# day: the diary never matches, "watched today" is never true, and the
+# after-credits prompt is filtered out as being in the future. Everything
+# downstream slices [:10], so the stamps are rewritten in the user's zone
+# once, here, and every date in the profile is a calendar day you lived.
+def user_zone():
+    name = os.environ.get("USER_TZ") or os.environ.get("NUDGE_TZ") or "America/Chicago"
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:
+        print(f"timezone {name!r} unavailable, keeping Trakt's UTC dates")
+        return None
+
+
+def localize(stamp, zone):
+    """'2026-09-13T01:12:44.000Z' -> '2026-09-12T20:12:44-05:00' (in zone).
+    Anything unparseable (or no zone) is returned as it came."""
+    if not stamp or not zone or not isinstance(stamp, str):
+        return stamp
+    try:
+        dt = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return stamp
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(zone).isoformat(timespec="seconds")
+
+
 def pull_trakt():
     """Trakt is optional: it adds scrobbled plays and a rating fallback, but
     the profile no longer depends on it. Returns None when unconfigured."""
@@ -228,6 +258,10 @@ def pull_trakt():
     history = trakt_paged(f"/users/{USER}/history/movies", {"limit": 100}, page_limit=15)
     print(f"  watched={len(watched)} ratings={len(ratings)} history={len(history)}")
 
+    zone = user_zone()
+    for h in history:
+        h["watched_at"] = localize(h.get("watched_at"), zone)
+
     watched_ids, play_of, last_of, ty_of = set(), {}, {}, {}
     for w in watched:
         m = w.get("movie", {})
@@ -236,7 +270,7 @@ def pull_trakt():
             continue
         watched_ids.add(tid)
         play_of[tid] = w.get("plays", 1)
-        last_of[tid] = (w.get("last_watched_at") or "")[:10]
+        last_of[tid] = (localize(w.get("last_watched_at"), zone) or "")[:10]
         ty_of[tid] = (m.get("title"), m.get("year"))
 
     rating_of = {}

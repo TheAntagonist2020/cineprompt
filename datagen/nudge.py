@@ -156,6 +156,8 @@ def unlogged_watches(data, day):
     out = []
     for u in data.get("unlogged") or []:
         when = parse_day(u.get("watched_at"))
+        if when and when > day:
+            when = day                       # a UTC-dated evening watch: it was today
         if when and 0 <= (day - when).days <= UNLOGGED_REMIND_DAYS and u.get("letterboxd_url"):
             out.append({**u, "_day": when})
     out.sort(key=lambda u: u["_day"], reverse=True)
@@ -338,20 +340,29 @@ def unlogged_poster(u, size="w500"):
     return poster_url(u, size)
 
 
-def compose_log(unlogged, day):
+def log_key(u):
+    return f"{u.get('tmdb')}:{u['_day'].isoformat()}"
+
+
+def compose_log(unlogged, day, sent_log=None):
     """The after-the-credits prompt: one film, one button, or nothing.
-    Yesterday counts too — a late show scrobbles after midnight."""
+    Yesterday counts too — a late show scrobbles after midnight. Films already
+    prompted are passed over, so a double feature gets both its prompts, one
+    per run, instead of the newest one blocking the other."""
     fresh = [u for u in unlogged if 0 <= (day - u["_day"]).days <= 1]
     if not fresh:
         return None, "nothing watched since yesterday that isn't in the diary"
-    u = fresh[0]
+    todo = [u for u in fresh if not already_sent(sent_log or {}, "log", day, log_key(u))]
+    if not todo:
+        return None, f"already prompted for {', '.join(u['title'] for u in fresh)} (NUDGE_FORCE=1 overrides)"
+    u = todo[0]
     source = "It's on Trakt" if u.get("source") == "trakt" else "You marked it watched"
     payload = {
         "title": f"{u['title']} — watched, not logged",
         "message": f"{source} but not in your Letterboxd diary. Log it while it's fresh.",
         "priority": 4, "tags": ["pencil"], "click": u["letterboxd_url"],
         "actions": [log_action(u)],
-        "_key": f"{u.get('tmdb')}:{u['_day'].isoformat()}",
+        "_key": log_key(u),
     }
     poster = unlogged_poster(u)
     if poster:
@@ -360,11 +371,11 @@ def compose_log(unlogged, day):
     return payload, None
 
 
-def compose(data, day, mode, web):
+def compose(data, day, mode, web, sent_log=None):
     quiet, last, today_titles, streak = watch_stats(data, day)
     unlogged = unlogged_watches(data, day)
     if mode == "log":
-        return compose_log(unlogged, day)
+        return compose_log(unlogged, day, sent_log)
     unlogged_today = [u for u in unlogged if u["_day"] == day]
     pool = candidate_pool(data)
     if not pool:
@@ -483,14 +494,14 @@ def main():
     web = (os.environ.get("STREMIO_WEB") or "").strip().lower() in ("1", "true", "yes")
     day = today()
 
-    payload, skipped = compose(data, day, mode, web)
+    sent_log = load_log()
+    force = (os.environ.get("NUDGE_FORCE") or "").strip().lower() in ("1", "true", "yes")
+    payload, skipped = compose(data, day, mode, web, {} if force else sent_log)
     if payload is None:
         print(f"nudge [{mode}] {day:%a %Y-%m-%d}: skipped — {skipped}")
         return 0
     key = payload.pop("_key", None)
 
-    sent_log = load_log()
-    force = (os.environ.get("NUDGE_FORCE") or "").strip().lower() in ("1", "true", "yes")
     if already_sent(sent_log, mode, day, key) and not force:
         what = f"the log prompt for {key}" if mode == "log" else f"the {mode} nudge"
         print(f"nudge [{mode}] {day:%a %Y-%m-%d}: skipped — {what} already went out (NUDGE_FORCE=1 overrides)")

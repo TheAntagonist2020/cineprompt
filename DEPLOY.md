@@ -146,7 +146,9 @@ demand.
 
 Times are UTC crons, so they drift an hour when clocks change, and GitHub
 runs its schedules late when it is busy (40 minutes is common in the evening).
-The IFTTT applets below fix both; the crons stay on as a backup.
+The IFTTT applets below start the run on the minute; the crons stay on as a
+backup. Runs never overlap, so a run that is already going finishes first
+(about two minutes) and the nudge follows it.
 
 ### Right after the credits, and on the minute (IFTTT)
 
@@ -192,12 +194,14 @@ Set it up:
      Every day at** 7:30pm / 9:00pm / 8:15am for the other three (IFTTT uses
      your account's time zone, so no UTC arithmetic).
 3. Watch something that scrobbles to Trakt. A few minutes later (IFTTT polls
-   Trakt, it is not instant) your phone says *watched, not logged* with a
-   Log button; the app's Today shows the same box. Log it and the next run
-   clears the prompt.
+   Trakt, it is not instant, and a run already in progress finishes first)
+   your phone says *watched, not logged* with a Log button; the app's Today
+   shows the same box. Log it and the next run clears the prompt.
 
-The token lives only in IFTTT's applet fields. If it leaks, the worst it can
-do is start this one workflow; revoke it under the same GitHub page.
+The token lives only in IFTTT's applet fields. Its scope is the Actions of
+this one repository: whoever holds it can start, re-run or cancel this
+repo's workflows, and nothing else (no code, no secrets, no other repo).
+If it leaks, revoke it under the same GitHub page.
 
 ### Tap straight into Stremio
 
