@@ -4,7 +4,7 @@ A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd
 
 Your choices in the app — **Shortlist**, **Not tonight**, **Watched** — are saved on the device first and mirrored to a Cloudflare D1 store, so they survive a reload, a rebuild, and a switch from phone to TV. The pipeline reads them back (see [DEPLOY.md](DEPLOY.md#let-the-pipeline-see-your-in-app-choices)) so the phone nudge and the Stremio row agree with the app.
 
-The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and three small Pages Functions (`/api/state`, `/api/health`, `/api/sync`, in `functions/api/`) provide the only runtime backend: a D1 table for your choices and a trigger for the rebuild workflow. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
+The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and four small Pages Functions (`/api/state`, `/api/health`, `/api/sync`, `/api/chat`, in `functions/api/`) provide the only runtime backend: D1 tables for your choices and Talk conversations, a trigger for the rebuild workflow, and the Claude chat. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
 
 Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library — every film in every filmography, collection, and canon list, plus directors and collections by name.
 
@@ -83,6 +83,12 @@ With IFTTT wired in (see [DEPLOY.md](DEPLOY.md#right-after-the-credits-and-on-th
 a Trakt scrobble starts the pipeline itself, so that prompt lands on the phone
 minutes after the credits rather than at the next scheduled run, and the timed
 runs fire on the minute instead of whenever GitHub gets to them.
+
+**Talk** is a conversation with Claude that has read the whole Letterboxd diary
+(every film, date, star rating, tag and review opening). The build writes that
+memory to `data/memory.txt` from `data.json`; `/api/chat` streams the replies and
+keeps conversations in D1. It needs an `ANTHROPIC_API_KEY` secret on the Pages
+project (see [DEPLOY.md](DEPLOY.md#turn-on-talk-claude-with-your-whole-diary)).
 
 Levels of refresh, lightest to heaviest:
 
@@ -221,12 +227,14 @@ client/          React SPA
   public/sw.js       service worker (offline + instant repeat loads)
   src/pages/         one file per route (today, queue, directors, ...)
   src/components/tonight.tsx  the one-pick "Tonight" hero on Today
+  src/pages/talk.tsx          Talk: chat with Claude over the whole diary
   src/lib/filmState.tsx       local-first film state (Shortlist / Not tonight / Watched), mirrored to D1
   src/lib/data.ts    data types + core/shard loaders + helpers
   src/lib/mood.tsx   mood-engine pick logic
   src/components/command-palette.tsx  ⌘K search over the whole library
 script/
   data-shards.ts     splits data.json into core + lazy shards (build step)
+  film-memory.ts     the Letterboxd diary as plain text, Claude's context for Talk
   make_icons.py      regenerates the favicon / PWA icons from the reel logo
 server/          Express app (index, routes, static, vite middleware)
 datagen/         Python data pipeline (TMDB / Trakt / Letterboxd)

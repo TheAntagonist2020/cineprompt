@@ -273,6 +273,38 @@ Access like the rest of the API). It needs one secret on the **Pages project**
 Without the secret the button still renders but reports a clear
 "GITHUB_TOKEN is not configured" error when clicked.
 
+## Turn on Talk (Claude, with your whole diary)
+
+The **Talk** page is a conversation with Claude that has read your entire
+Letterboxd diary: every film, watch date, star rating, tag and the opening of
+every review. The build writes that memory to `data/memory.txt`
+(`script/film-memory.ts`, Letterboxd only: Trakt plays are left out because
+Stremio scrobbles titles opened just to check the Plex library), and
+`/api/chat` hands it to Claude with each message. Conversations are kept in D1,
+so they follow you between the phone and the TV. Like the rest of `/api/*`, it
+sits behind Cloudflare Access.
+
+It needs one secret on the **Pages project**:
+
+1. [console.anthropic.com](https://console.anthropic.com) → **API keys →
+   Create key**. Copy it.
+2. Cloudflare dashboard → **Workers & Pages → cineprompt → Settings →
+   Variables and secrets → Add** → type **Secret**, name `ANTHROPIC_API_KEY`,
+   paste the key. Save, then redeploy (next CI run or `npm run cf:deploy`).
+
+Optional: `ANTHROPIC_BASE_URL` routes the calls through a Cloudflare AI
+Gateway (for its logs and spend limits) instead of straight to Anthropic.
+
+**What it costs.** The memory is about 250,000 tokens and is cached for an hour
+at a time. The first message in an hour pays to load it (roughly $2.50 on
+Claude Opus 5); every message after that within the hour pays about a tenth of
+the normal input price for it (roughly $0.12), plus the reply itself. A
+typical evening conversation lands in the $3-5 range. Set a monthly spend
+limit in the Anthropic console if you want a hard ceiling.
+
+Without the secret the page still loads and shows past conversations, and
+sending reports "ANTHROPIC_API_KEY is not configured".
+
 ## Custom domain (optional)
 
 To use e.g. `cine.lunarafilm.com`: Pages project → **Custom domains → Set up a

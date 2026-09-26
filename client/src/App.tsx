@@ -11,6 +11,7 @@ import { FilmStateProvider } from "@/lib/filmState";
 import Today from "@/pages/today";
 
 const Week = lazy(() => import("@/pages/week"));
+const Talk = lazy(() => import("@/pages/talk"));
 const Background = lazy(() => import("@/pages/background"));
 const Queue = lazy(() => import("@/pages/queue"));
 const Shortlist = lazy(() => import("@/pages/shortlist"));
@@ -41,6 +42,7 @@ function AppRouter() {
         <Suspense fallback={<LoadingScreen />}>
           <Switch location={loc}>
             <Route path="/" component={Today} />
+            <Route path="/talk" component={Talk} />
             <Route path="/week" component={Week} />
             <Route path="/background" component={Background} />
             <Route path="/queue" component={Queue} />

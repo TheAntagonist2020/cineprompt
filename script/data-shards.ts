@@ -24,6 +24,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { buildFilmMemory } from "./film-memory";
 
 // Keys no client code references anywhere. Verified by grep across
 // client/src before removal; they exist only because the pipeline emits them.
@@ -216,6 +217,11 @@ export async function generateShards(
 
   // ---- search index ---------------------------------------------------
   await write("search.json", buildSearchIndex(data, slugs));
+
+  // ---- film memory (server-side context for /api/chat; no client code reads it)
+  const memory = buildFilmMemory(data);
+  await writeFile(path.join(outDir, "memory.txt"), memory);
+  shards.push({ file: "memory.txt", bytes: Buffer.byteLength(memory) });
 
   // ---- core -----------------------------------------------------------
   const carved = new Set<string>([
