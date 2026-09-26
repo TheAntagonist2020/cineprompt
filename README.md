@@ -4,7 +4,7 @@ A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd
 
 Your choices in the app — **Shortlist**, **Not tonight**, **Watched** — are saved on the device first and mirrored to a Cloudflare D1 store, so they survive a reload, a rebuild, and a switch from phone to TV. The pipeline reads them back (see [DEPLOY.md](DEPLOY.md#let-the-pipeline-see-your-in-app-choices)) so the phone nudge and the Stremio row agree with the app.
 
-The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and four small Pages Functions (`/api/state`, `/api/health`, `/api/sync`, `/api/chat`, in `functions/api/`) provide the only runtime backend: D1 tables for your choices and Talk conversations, a trigger for the rebuild workflow, and the Claude chat. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
+The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and a handful of Pages Functions (`/api/state`, `/api/health`, `/api/sync`, `/api/chat`, `/api/log`, in `functions/api/`) provide the only runtime backend: D1 tables for your choices, Talk conversations and Log entries, a trigger for the rebuild workflow, and the Claude calls. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
 
 Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library — every film in every filmography, collection, and canon list, plus directors and collections by name.
 
@@ -89,6 +89,12 @@ runs fire on the minute instead of whenever GitHub gets to them.
 memory to `data/memory.txt` from `data.json`; `/api/chat` streams the replies and
 keeps conversations in D1. It needs an `ANTHROPIC_API_KEY` secret on the Pages
 project (see [DEPLOY.md](DEPLOY.md#turn-on-talk-claude-with-your-whole-diary)).
+
+**Log** (`/log/`) is a separate installable app for getting films into the
+Letterboxd diary: stars, a few words (typed or spoken), a review drafted by
+Claude in your own voice, then copy and open Letterboxd. It keeps a "still to
+write up" list for stars-only logs and remembers titles Stremio opened that were
+only library checks.
 
 Levels of refresh, lightest to heaviest:
 
@@ -228,6 +234,8 @@ client/          React SPA
   src/pages/         one file per route (today, queue, directors, ...)
   src/components/tonight.tsx  the one-pick "Tonight" hero on Today
   src/pages/talk.tsx          Talk: chat with Claude over the whole diary
+  log/index.html     the Log app's page (its own manifest + icons in public/log/)
+  src/log/           the Log app: film -> stars -> words -> review in your voice
   src/lib/filmState.tsx       local-first film state (Shortlist / Not tonight / Watched), mirrored to D1
   src/lib/data.ts    data types + core/shard loaders + helpers
   src/lib/mood.tsx   mood-engine pick logic

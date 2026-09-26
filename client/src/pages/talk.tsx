@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowUp, MessageCircle, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { readSSE } from "@/lib/sse";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Conv = { id: string; title: string; updated_at: number };
@@ -28,29 +29,6 @@ function recall(): string | null {
     return localStorage.getItem(LAST_KEY);
   } catch {
     return null;
-  }
-}
-
-async function* readSSE(res: Response): AsyncGenerator<{ event: string; data: any }> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let i: number;
-    while ((i = buf.indexOf("\n\n")) >= 0) {
-      const chunk = buf.slice(0, i);
-      buf = buf.slice(i + 2);
-      let event = "message";
-      let data = "";
-      for (const line of chunk.split("\n")) {
-        if (line.startsWith("event: ")) event = line.slice(7);
-        else if (line.startsWith("data: ")) data += line.slice(6);
-      }
-      if (data) yield { event, data: JSON.parse(data) };
-    }
   }
 }
 

@@ -305,6 +305,28 @@ limit in the Anthropic console if you want a hard ceiling.
 Without the secret the page still loads and shows past conversations, and
 sending reports "ANTHROPIC_API_KEY is not configured".
 
+### The Log app (its own home-screen icon)
+
+`/log/` is a separate, focused app for getting a film into the Letterboxd
+diary: pick the film, tap the stars, say what you thought (type it, or tap
+**Talk** and speak), and Claude drafts the review in your voice from the same
+memory. **Copy review & open Letterboxd** puts the review on the clipboard and
+opens the film; paste, set the stars and date, Save, then tap **It's on
+Letterboxd**. **Just the stars for now** opens Letterboxd without a review and
+keeps the film under **Still to write up** for later. Letterboxd has no public
+API for writing entries, so the last tap is always yours.
+
+It uses the same `ANTHROPIC_API_KEY` (drafts share Talk's cached memory, so a
+review drafted within the hour of a conversation costs cents) and keeps its
+entries in D1 (`log_entries`). Titles Stremio opened that the diary lacks show
+up as **Did you watch these?**; **Just a check** is remembered, so a Plex
+library check never comes up again.
+
+To put it on the phone as its own app: open `https://<your-domain>/log/` in
+Safari → **Share → Add to Home Screen** (Android/Chrome: **Install app**). It
+gets its own amber icon and opens straight into logging. On Android the
+Cineprompt icon also offers **Log a film** on long-press.
+
 ## Custom domain (optional)
 
 To use e.g. `cine.lunarafilm.com`: Pages project → **Custom domains → Set up a

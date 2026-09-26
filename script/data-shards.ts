@@ -165,6 +165,65 @@ function buildSearchIndex(data: any, slugs: Map<string, string>) {
   return { films: [...rows.values()], directors, collections };
 }
 
+/**
+ * The small payload the Log app (client/log/) needs instead of core.json:
+ * the tags actually used in the last three years (the chip row), tonight's
+ * pick, and titles Trakt saw that the diary does not have. Those are only
+ * candidates: Stremio scrobbles titles opened just to check the Plex library.
+ */
+function buildLogMeta(data: any) {
+  const dates: string[] = [];
+  for (const t of Object.values<any>(data.tags ?? {})) {
+    for (const f of t?.films ?? []) if (typeof f?.watched_date === "string") dates.push(f.watched_date);
+  }
+  const newest = dates.sort().at(-1) ?? "";
+  const since = newest ? `${Number(newest.slice(0, 4)) - 3}${newest.slice(4, 10)}` : "";
+  const counts = new Map<string, number>();
+  for (const [tag, t] of Object.entries<any>(data.tags ?? {})) {
+    if (/^\d{4}$/.test(tag)) continue; // year tags carry no choice
+    const dated = /\b((?:19|20)\d{2})$/.exec(tag); // "halloween 2023": only this year's
+    if (dated && dated[1] !== newest.slice(0, 4)) continue;
+    const n = (t?.films ?? []).filter((f: any) => (f?.watched_date ?? "") >= since).length;
+    if (n) counts.set(tag, n);
+  }
+  const tags = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 20)
+    .map(([tag]) => tag);
+
+  const p = data.todays_pick;
+  const tonight =
+    p && typeof p.tmdb_id === "number"
+      ? { tmdb_id: p.tmdb_id, title: p.title, year: String(p.year ?? ""), poster: p.poster ?? null }
+      : null;
+
+  const maybe = (data.unlogged ?? [])
+    .filter((u: any) => typeof u?.tmdb === "number" && u.title)
+    .map((u: any) => ({
+      tmdb_id: u.tmdb,
+      title: u.title,
+      year: String(u.year || ""),
+      poster: u.poster ?? null,
+      seen_on: u.watched_at ?? null,
+    }));
+
+  return { user: data.user?.letterboxd ?? null, generated_at: data.generated_at ?? null, tags, tonight, maybe };
+}
+
+/**
+ * Every film in the Letterboxd diary, in the search index's row shape, so the
+ * Log app finds a rewatch (or a new release the recommendation pools never
+ * held) by its TMDB id. Row: [tmdb_id, title, year, director, poster, seen=1].
+ */
+function buildLogFilms(data: any) {
+  const films: Array<[number, string, string, string, string | null, 1]> = [];
+  for (const row of data.letterboxd_profile?.films ?? []) {
+    const [title, year, tmdb, , , , , poster] = row;
+    if (typeof tmdb === "number" && tmdb > 0 && title) films.push([tmdb, title, String(year ?? ""), "", poster ?? null, 1]);
+  }
+  return { films };
+}
+
 export async function generateShards(
   srcPath: string,
   outDir: string,
@@ -222,6 +281,10 @@ export async function generateShards(
   const memory = buildFilmMemory(data);
   await writeFile(path.join(outDir, "memory.txt"), memory);
   shards.push({ file: "memory.txt", bytes: Buffer.byteLength(memory) });
+
+  // ---- Log app: tag chips, tonight's pick, maybe-watched titles --------
+  await write("log-meta.json", buildLogMeta(data));
+  await write("log-films.json", buildLogFilms(data));
 
   // ---- core -----------------------------------------------------------
   const carved = new Set<string>([
