@@ -14,7 +14,7 @@ on:
     # Cron is ALWAYS UTC and ignores DST. Central is UTC-5 (CDT) / UTC-6 (CST).
     - cron: "17 13 * * *"   # ~morning CT (08:17 CDT / 07:17 CST): refresh only, no nudge
     - cron: "30 0 * * *"    # ~evening CT (19:30 CDT / 18:30 CST): refresh + the nudge
-    - cron: "0 2 * * *"     # ~late CT (21:00 CDT / 20:00 CST): follow-up, only if nothing logged today
+    - cron: "0 2 * * *"     # ~late CT (21:00 CDT / 20:00 CST): nightly check-in, only if the diary has nothing today
   workflow_dispatch:
     inputs:
       reason:
@@ -211,6 +211,13 @@ jobs:
             --command "SELECT tmdb_id, status, snooze_until, rating, updated_at, title, year, poster, imdb_id, directors, runtime, reasons FROM film_state" \
             > state.json
           python datagen/apply_state.py client/public/data.json state.json
+          # What the Log app already handled, so the check-in never asks about
+          # it: "just a check" for good, any other entry for two weeks (a later
+          # rewatch of the same film is still asked about). The table appears on the Log
+          # app's first use; until then this is an empty list.
+          npx wrangler@4 d1 execute cineprompt-db --remote --json \
+            --command "SELECT tmdb_id, status FROM log_entries WHERE tmdb_id IS NOT NULL AND (status = 'check' OR updated_at > (unixepoch() - 14 * 86400) * 1000)" \
+            > log_state.json || echo '[]' > log_state.json
 
       # Push the current picks to the "Cineprompt — Tonight" MDBList list, which
       # surfaces in Stremio. Non-fatal: a MDBList hiccup must not block the deploy.
@@ -270,13 +277,14 @@ jobs:
       # ---- The push half -------------------------------------------------
       # Everything above updates the site and waits for you to visit it. This
       # sends the picks to your phone so the site doesn't have to be visited
-      # at all. Evening run, follow-up, and dispatches other than `morning`:
-      # a nudge at 08:17 is noise. A `watched` dispatch (IFTTT, right after a
-      # Trakt scrobble) sends only the "log it on Letterboxd" prompt, and
-      # nothing when the diary already has it. nudge.py keeps a log so the
-      # same nudge never goes out twice in a day, whichever trigger got
-      # there first. Runs after the deploy and is non-fatal, so it can never
-      # cost a deploy.
+      # at all. Evening run, the 9pm check-in, and dispatches other than
+      # `morning`: a nudge at 08:17 is noise. A `watched` dispatch (IFTTT, off
+      # a Trakt scrobble) only refreshes the data: Stremio scrobbles titles
+      # opened to check the Plex library, so a per-scrobble push would nag
+      # about films that were never watched. nudge.py keeps a log so the same
+      # nudge never goes out twice in a day, whichever trigger got there
+      # first. Runs after the deploy and is non-fatal, so it can never cost a
+      # deploy.
       - name: Nudge me to watch something
         id: nudge
         if: >-
@@ -287,8 +295,9 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
-          # 9pm cron / `followup` -> the quiet follow-up; `watched` -> the diary
-          # prompt only; everything else (evening cron, manual, `evening`) -> main nudge
+          # 9pm cron / `followup` -> the nightly check-in ("Watch anything
+          # today?", the Log app one tap away); `watched` -> nothing (retired
+          # `log` mode); everything else (evening cron, manual, `evening`) -> main nudge
           NUDGE_MODE: >-
             ${{ (github.event.schedule == '0 2 * * *' || github.event.inputs.reason == 'followup') && 'followup'
                 || github.event.inputs.reason == 'watched' && 'log'
@@ -298,6 +307,8 @@ jobs:
           STREMIO_WEB: ${{ vars.STREMIO_WEB }}
           # the nudge's day is your calendar day, not the runner's UTC date
           NUDGE_TZ: ${{ vars.USER_TZ }}
+          # the Log app's entries, exported by the in-app choices step
+          NUDGE_LOG_STATE: log_state.json
           PYTHONUTF8: "1"
         run: python datagen/nudge.py client/public/data.json
 

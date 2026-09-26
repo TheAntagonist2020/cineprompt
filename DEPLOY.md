@@ -150,25 +150,33 @@ The IFTTT applets below start the run on the minute; the crons stay on as a
 backup. Runs never overlap, so a run that is already going finishes first
 (about two minutes) and the nudge follows it.
 
-### Right after the credits, and on the minute (IFTTT)
+### On the minute (IFTTT)
 
-Two things GitHub's schedule cannot do: react to a watch the moment it
-happens, and fire at an exact time. An [IFTTT](https://ifttt.com) Pro account
-does both with no server of your own, by starting the same workflow through
+GitHub's schedule cannot fire at an exact time: a busy runner starts the
+7:30pm run at 8:11pm. An [IFTTT](https://ifttt.com) Pro account fires on the
+minute with no server of your own, by starting the same workflow through
 GitHub's API. The workflow's `reason` input tells the run why it fired:
 
 | `reason` | What the run does | Who fires it |
 | --- | --- | --- |
-| `watched` | refresh, redeploy, then **only** the "*X — watched, not logged*" prompt with a Log button; silent if the diary already has it | IFTTT, off Trakt's **New watched movie** (a Plex/Stremio scrobble) |
 | `evening` | refresh, redeploy, the main nudge | IFTTT, every day at 7:30pm |
-| `followup` | refresh, redeploy, the quiet follow-up | IFTTT, every day at 9:00pm |
+| `followup` | refresh, redeploy, the nightly check-in: "*Watch anything today?*" with the Log app one tap away, the titles Stremio opened (as a question), and one easy pick; silent if the diary already has something today | IFTTT, every day at 9:00pm |
 | `morning` | refresh, redeploy, no nudge | IFTTT, every day at 8:15am |
 | `manual` (default) | refresh, redeploy, the main nudge | you, **Run workflow** |
+| `watched` | refresh and redeploy only, no push | nobody, by default (see below) |
+
+**No push per scrobble.** Stremio scrobbles a title to Trakt whenever it is
+opened, including to check the Plex library, so a Trakt play is not a watch.
+A push on every scrobble would nag about films that were never watched; the
+9pm check-in asks once instead, and the Log app and Today list those titles
+as *Did you watch these?* with **Just a check** remembered for good. Leave a
+Trakt **New watched movie** applet off; if one exists, `watched` only
+refreshes the data.
 
 **Never twice.** `nudge.py` keeps a small log across runs
 (`datagen/.nudge_log.json`, cached with the Letterboxd profile): the evening
-and follow-up nudges go out at most once per calendar day, the diary prompt
-at most once per watch. So the GitHub cron and the IFTTT applet can both
+and check-in nudges go out at most once per calendar day. So the GitHub cron
+and the IFTTT applet can both
 fire and the first one wins; a `Run workflow` after 7:30pm does not re-send
 unless you tick **force_nudge**.
 
@@ -179,7 +187,7 @@ Set it up:
    Repository access: **only `cineprompt`**. Permissions: **Actions → Read and
    write** (nothing else). Set the longest expiry you are comfortable with and
    copy it once.
-2. **Four applets**, each a Webhooks **Make a web request** action:
+2. **Three applets**, each a Webhooks **Make a web request** action:
    - URL `https://api.github.com/repos/TheAntagonist2020/cineprompt/actions/workflows/update.yml/dispatches`
    - Method `POST`, content type `application/json`
    - Additional headers (one per line):
@@ -188,15 +196,13 @@ Set it up:
      Accept: application/vnd.github+json
      X-GitHub-Api-Version: 2022-11-28
      ```
-   - Body `{"ref":"main","inputs":{"reason":"watched"}}` — with `evening`,
-     `followup` or `morning` in place of `watched` for the three timed ones.
-   - Triggers: **Trakt → New watched movie** for `watched`; **Date & Time →
-     Every day at** 7:30pm / 9:00pm / 8:15am for the other three (IFTTT uses
-     your account's time zone, so no UTC arithmetic).
-3. Watch something that scrobbles to Trakt. A few minutes later (IFTTT polls
-   Trakt, it is not instant, and a run already in progress finishes first)
-   your phone says *watched, not logged* with a Log button; the app's Today
-   shows the same box. Log it and the next run clears the prompt.
+   - Body `{"ref":"main","inputs":{"reason":"evening"}}`, with `followup` or
+     `morning` in place of `evening` for the other two.
+   - Trigger: **Date & Time → Every day at** 7:30pm / 9:00pm / 8:15am (IFTTT
+     uses your account's time zone, so no UTC arithmetic).
+3. Test it: **Actions → Update & Deploy Cineprompt → Run workflow**, reason
+   `followup`, tick **force_nudge**. A couple of minutes later the phone gets
+   the check-in (or nothing, if the diary already has something today).
 
 The token lives only in IFTTT's applet fields. Its scope is the Actions of
 this one repository: whoever holds it can start, re-run or cancel this

@@ -68,21 +68,18 @@ a bot challenge, so the pipeline deliberately never scrapes it.
 Trakt, if configured, is layered on top: its watched set is unioned in, its
 ratings fill gaps Letterboxd hasn't rated. Where both rate a film, Letterboxd wins.
 
-**A watch is not a diary entry.** A Trakt scrobble, or tapping **Watched** in
-the app, records that you saw something — it does not write your diary. The
-pipeline lists every recent watch that has no Letterboxd entry within two days
-of it (`unlogged`), and the app prompts for the entry everywhere it matters:
-a "Watched, not in your diary" box at the top of Today with a **Log it** button
-per film, a **Log it on Letterboxd** link the moment you mark a film watched, a
-**Log it** badge on the Tracking rows, and the phone nudge leads with
-"*watched, not logged*" and a Log button (the 9pm follow-up sends that reminder
-too, instead of staying silent). Once you log it, the next run's RSS pass sees
-the entry and the prompt clears itself.
+**A Trakt play is not a watch.** Stremio scrobbles a title to Trakt whenever
+it is opened, including to check the Plex library, so the pipeline treats
+recent Trakt titles with no Letterboxd entry (`unlogged`) as questions, not
+facts. Today shows them as *Did you watch these?*: **Log it** opens the Log
+app on that film, and the X records *just a check* in D1 so the title never
+comes up again on any device. The 7:30pm nudge counts from the diary, not
+Trakt, and the 9pm run is a nightly check-in (*Watch anything today?*, the
+Log app one tap away) that stays silent when the diary already has today.
+There is no push per scrobble.
 
-With IFTTT wired in (see [DEPLOY.md](DEPLOY.md#right-after-the-credits-and-on-the-minute-ifttt)),
-a Trakt scrobble starts the pipeline itself, so that prompt lands on the phone
-minutes after the credits rather than at the next scheduled run, and the timed
-runs fire on the minute instead of whenever GitHub gets to them.
+With IFTTT wired in (see [DEPLOY.md](DEPLOY.md#on-the-minute-ifttt)), the
+timed runs fire on the minute instead of whenever GitHub gets to them.
 
 **Talk** is a conversation with Claude that has read the whole Letterboxd diary
 (every film, date, star rating, tag and review opening). The build writes that

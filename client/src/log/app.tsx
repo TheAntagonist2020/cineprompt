@@ -269,6 +269,7 @@ export default function LogApp() {
   const [screen, setScreen] = useState<"home" | "entry" | "review">("home");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -279,6 +280,7 @@ export default function LogApp() {
         setChecks(new Set(j.checks ?? []));
       }
     } catch {}
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -324,6 +326,27 @@ export default function LogApp() {
     setEntry(existing ?? blankEntry(p));
     setScreen("entry");
   };
+
+  // Deep link from Cineprompt: /log/?tmdb=…&title=…&year=…&poster=… opens that
+  // film's entry directly, once the saved entries are in (so a draft resumes).
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (!loaded || deepLinked.current) return;
+    deepLinked.current = true;
+    const q = new URLSearchParams(window.location.search);
+    const title = q.get("title");
+    if (!title) return;
+    const tmdb = Number(q.get("tmdb"));
+    begin({
+      tmdb_id: Number.isInteger(tmdb) && tmdb > 0 ? tmdb : null,
+      title,
+      year: q.get("year") ?? "",
+      poster: q.get("poster"),
+      seen: q.get("seen") === "1",
+    });
+    window.history.replaceState(null, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
   const markCheck = async (p: Pick) => {
     await saveEntry({ ...blankEntry(p), status: "check" }).catch(() => null);
