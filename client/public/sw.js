@@ -5,7 +5,9 @@
  * outright. Strategy per resource class:
  *
  *   navigations   network-first, fall back to the cached shell. You always get
- *                 fresh HTML online, and the app still opens on a plane.
+ *                 fresh HTML online, and the app still opens on a plane. The
+ *                 Log app (/log/) keeps its own shell, so neither app ever
+ *                 opens as the other offline.
  *   /assets/*     cache-first. Vite content-hashes these, so a cached copy can
  *                 never be stale — a change ships under a new filename.
  *   /data/*       stale-while-revalidate. Repeat visits render from cache
@@ -15,7 +17,7 @@
  *
  * Bump VERSION to retire every cache from an older release.
  */
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL = `cineprompt-shell-${VERSION}`;
 const ASSETS = `cineprompt-assets-${VERSION}`;
 const DATA = `cineprompt-data-${VERSION}`;
@@ -29,7 +31,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(SHELL)
-      .then((c) => c.addAll(["./", "./index.html"]))
+      .then((c) => c.addAll(["./", "./index.html", "./log/"]))
       .catch(() => {})
       .then(() => self.skipWaiting()),
   );
@@ -82,16 +84,17 @@ async function staleWhileRevalidate(request, cacheName) {
 }
 
 async function networkFirstShell(request) {
+  const shell = new URL(request.url).pathname.startsWith("/log/") ? "./log/" : "./index.html";
   try {
     const res = await fetch(request);
     if (res && res.ok) {
       const cache = await caches.open(SHELL);
-      cache.put("./index.html", res.clone());
+      cache.put(shell, res.clone());
     }
     return res;
   } catch {
     const cache = await caches.open(SHELL);
-    const hit = (await cache.match("./index.html")) || (await cache.match("./"));
+    const hit = (await cache.match(shell)) || (shell === "./index.html" ? await cache.match("./") : null);
     if (hit) return hit;
     throw new Error("offline with no cached shell");
   }

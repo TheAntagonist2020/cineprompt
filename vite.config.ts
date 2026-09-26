@@ -78,6 +78,12 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     rollupOptions: {
+      // Two pages: the app, and the standalone Log app at /log/ (its own
+      // manifest, so it installs as its own home-screen icon).
+      input: {
+        main: path.resolve(import.meta.dirname, "client", "index.html"),
+        log: path.resolve(import.meta.dirname, "client", "log", "index.html"),
+      },
       output: {
         // Stable vendor chunks: app-code edits don't invalidate the big
         // framework chunks in the browser/CDN cache, and the chart stack

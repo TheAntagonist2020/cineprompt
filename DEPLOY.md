@@ -144,8 +144,70 @@ If you logged a film today, the evening message says so and eases off instead of
 piling on, and keeps count of your streak. `Run workflow` sends the main nudge on
 demand.
 
-Times are UTC crons, so they drift an hour when clocks change; adjust the two
-evening crons in `.github/workflows/update.yml` if that bothers you.
+Times are UTC crons, so they drift an hour when clocks change, and GitHub
+runs its schedules late when it is busy (40 minutes is common in the evening).
+The IFTTT applets below start the run on the minute; the crons stay on as a
+backup. Runs never overlap, so a run that is already going finishes first
+(about two minutes) and the nudge follows it.
+
+### On the minute (IFTTT)
+
+GitHub's schedule cannot fire at an exact time: a busy runner starts the
+7:30pm run at 8:11pm. An [IFTTT](https://ifttt.com) Pro account fires on the
+minute with no server of your own, by starting the same workflow through
+GitHub's API. The workflow's `reason` input tells the run why it fired:
+
+| `reason` | What the run does | Who fires it |
+| --- | --- | --- |
+| `evening` | refresh, redeploy, the main nudge | IFTTT, every day at 7:30pm |
+| `followup` | refresh, redeploy, the nightly check-in: "*Watch anything today?*" with the Log app one tap away, the titles Stremio opened (as a question), and one easy pick; silent if the diary already has something today | IFTTT, every day at 9:00pm |
+| `morning` | refresh, redeploy, no nudge | IFTTT, every day at 8:15am |
+| `manual` (default) | refresh, redeploy, the main nudge | you, **Run workflow** |
+| `watched` | refresh and redeploy only, no push | nobody, by default (see below) |
+
+**No push per scrobble.** Stremio scrobbles a title to Trakt whenever it is
+opened, including to check the Plex library, so a Trakt play is not a watch.
+A push on every scrobble would nag about films that were never watched; the
+9pm check-in asks once instead, and the Log app and Today list those titles
+as *Did you watch these?* with **Just a check** remembered for good. Leave a
+Trakt **New watched movie** applet off; if one exists, `watched` only
+refreshes the data.
+
+**Never twice.** `nudge.py` keeps a small log across runs
+(`datagen/.nudge_log.json`, cached with the Letterboxd profile): the evening
+and check-in nudges go out at most once per calendar day. So the GitHub cron
+and the IFTTT applet can both
+fire and the first one wins; a `Run workflow` after 7:30pm does not re-send
+unless you tick **force_nudge**.
+
+Set it up:
+
+1. **A GitHub token for IFTTT.** GitHub → Settings → Developer settings →
+   Personal access tokens → **Fine-grained tokens → Generate new token**.
+   Repository access: **only `cineprompt`**. Permissions: **Actions → Read and
+   write** (nothing else). Set the longest expiry you are comfortable with and
+   copy it once.
+2. **Three applets**, each a Webhooks **Make a web request** action:
+   - URL `https://api.github.com/repos/TheAntagonist2020/cineprompt/actions/workflows/update.yml/dispatches`
+   - Method `POST`, content type `application/json`
+   - Additional headers (one per line):
+     ```
+     Authorization: Bearer <your token>
+     Accept: application/vnd.github+json
+     X-GitHub-Api-Version: 2022-11-28
+     ```
+   - Body `{"ref":"main","inputs":{"reason":"evening"}}`, with `followup` or
+     `morning` in place of `evening` for the other two.
+   - Trigger: **Date & Time → Every day at** 7:30pm / 9:00pm / 8:15am (IFTTT
+     uses your account's time zone, so no UTC arithmetic).
+3. Test it: **Actions → Update & Deploy Cineprompt → Run workflow**, reason
+   `followup`, tick **force_nudge**. A couple of minutes later the phone gets
+   the check-in (or nothing, if the diary already has something today).
+
+The token lives only in IFTTT's applet fields. Its scope is the Actions of
+this one repository: whoever holds it can start, re-run or cancel this
+repo's workflows, and nothing else (no code, no secrets, no other repo).
+If it leaks, revoke it under the same GitHub page.
 
 ### Tap straight into Stremio
 
@@ -216,6 +278,60 @@ Access like the rest of the API). It needs one secret on the **Pages project**
 
 Without the secret the button still renders but reports a clear
 "GITHUB_TOKEN is not configured" error when clicked.
+
+## Turn on Talk (Claude, with your whole diary)
+
+The **Talk** page is a conversation with Claude that has read your entire
+Letterboxd diary: every film, watch date, star rating, tag and the opening of
+every review. The build writes that memory to `data/memory.txt`
+(`script/film-memory.ts`, Letterboxd only: Trakt plays are left out because
+Stremio scrobbles titles opened just to check the Plex library), and
+`/api/chat` hands it to Claude with each message. Conversations are kept in D1,
+so they follow you between the phone and the TV. Like the rest of `/api/*`, it
+sits behind Cloudflare Access.
+
+It needs one secret on the **Pages project**:
+
+1. [console.anthropic.com](https://console.anthropic.com) → **API keys →
+   Create key**. Copy it.
+2. Cloudflare dashboard → **Workers & Pages → cineprompt → Settings →
+   Variables and secrets → Add** → type **Secret**, name `ANTHROPIC_API_KEY`,
+   paste the key. Save, then redeploy (next CI run or `npm run cf:deploy`).
+
+Optional: `ANTHROPIC_BASE_URL` routes the calls through a Cloudflare AI
+Gateway (for its logs and spend limits) instead of straight to Anthropic.
+
+**What it costs.** The memory is about 250,000 tokens and is cached for an hour
+at a time. The first message in an hour pays to load it (roughly $2.50 on
+Claude Opus 5); every message after that within the hour pays about a tenth of
+the normal input price for it (roughly $0.12), plus the reply itself. A
+typical evening conversation lands in the $3-5 range. Set a monthly spend
+limit in the Anthropic console if you want a hard ceiling.
+
+Without the secret the page still loads and shows past conversations, and
+sending reports "ANTHROPIC_API_KEY is not configured".
+
+### The Log app (its own home-screen icon)
+
+`/log/` is a separate, focused app for getting a film into the Letterboxd
+diary: pick the film, tap the stars, say what you thought (type it, or tap
+**Talk** and speak), and Claude drafts the review in your voice from the same
+memory. **Copy review & open Letterboxd** puts the review on the clipboard and
+opens the film; paste, set the stars and date, Save, then tap **It's on
+Letterboxd**. **Just the stars for now** opens Letterboxd without a review and
+keeps the film under **Still to write up** for later. Letterboxd has no public
+API for writing entries, so the last tap is always yours.
+
+It uses the same `ANTHROPIC_API_KEY` (drafts share Talk's cached memory, so a
+review drafted within the hour of a conversation costs cents) and keeps its
+entries in D1 (`log_entries`). Titles Stremio opened that the diary lacks show
+up as **Did you watch these?**; **Just a check** is remembered, so a Plex
+library check never comes up again.
+
+To put it on the phone as its own app: open `https://<your-domain>/log/` in
+Safari → **Share → Add to Home Screen** (Android/Chrome: **Install app**). It
+gets its own amber icon and opens straight into logging. On Android the
+Cineprompt icon also offers **Log a film** on long-press.
 
 ## Custom domain (optional)
 

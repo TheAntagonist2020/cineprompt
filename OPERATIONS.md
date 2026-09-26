@@ -9,6 +9,10 @@ A private film dashboard at **https://cineprompt.pages.dev** that:
 - shows unseen films worth watching (canon, your favorite directors, your blind spots)
   plus a few comfort rewatches for background,
 - **updates itself twice a day** from your Letterboxd diary (Trakt too, if configured),
+- **checks in at 9pm** ("Watch anything today?") when your Letterboxd diary has
+  nothing for the day, with the **Log** app one tap away (DEPLOY.md, "On the minute"),
+- has **Talk** (Claude, with your whole diary read) and the **Log** app at `/log/`
+  (stars, a few words, a review drafted in your voice) once `ANTHROPIC_API_KEY` is set,
 - is locked so only **daltino1@gmail.com** can open it.
 
 ## Where everything lives (so nothing can be "lost")

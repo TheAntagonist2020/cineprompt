@@ -11,6 +11,9 @@ Writes into client/public/:
     icon-512.png         PWA manifest / splash
     apple-touch-icon.png iOS home screen (opaque background, no transparency)
 
+and the same four into client/public/log/ for the Log app, colours inverted
+(dark reel on amber) so the two home-screen icons are told apart at a glance.
+
 Pure stdlib — no Pillow or cairosvg in the build image.
 
     python script/make_icons.py
@@ -57,7 +60,7 @@ def coverage(x: float, y: float) -> float:
     return 0.0
 
 
-def render(size: int, padding: float = 0.0) -> bytes:
+def render(size: int, padding: float = 0.0, bg=BG, fg=FG) -> bytes:
     """Render to raw RGB rows, antialiased by supersampling."""
     span = 32.0 / (1.0 - 2 * padding)
     origin = -padding * span
@@ -72,13 +75,13 @@ def render(size: int, padding: float = 0.0) -> bytes:
                     x = origin + ((px + (sx + 0.5) / SS) / size) * span
                     acc += coverage(x, y)
             a = acc / (SS * SS)
-            row += bytes(round(BG[i] + (FG[i] - BG[i]) * a) for i in range(3))
+            row += bytes(round(bg[i] + (fg[i] - bg[i]) * a) for i in range(3))
         rows.append(bytes(row))
     return b"".join(b"\x00" + r for r in rows)  # filter byte 0 per scanline
 
 
-def write_png(path: str, size: int, padding: float = 0.0) -> None:
-    raw = render(size, padding)
+def write_png(path: str, size: int, padding: float = 0.0, bg=BG, fg=FG) -> None:
+    raw = render(size, padding, bg, fg)
 
     def chunk(tag: bytes, data: bytes) -> bytes:
         return (
@@ -125,6 +128,15 @@ def main() -> None:
     write_png(os.path.join(PUBLIC, "icon-512.png"), 512)
     # iOS crops to a rounded rect and ignores transparency, so inset the reel.
     write_png(os.path.join(PUBLIC, "apple-touch-icon.png"), 180, padding=0.12)
+
+    log = os.path.join(PUBLIC, "log")
+    os.makedirs(log, exist_ok=True)
+    with open(os.path.join(log, "favicon.svg"), "w", encoding="utf-8") as fh:
+        fh.write(SVG.replace("#0f0f10", "#TMP").replace("#d1a861", "#0f0f10").replace("#TMP", "#d1a861"))
+    print("log/favicon.svg")
+    write_png(os.path.join(log, "icon-192.png"), 192, bg=FG, fg=BG)
+    write_png(os.path.join(log, "icon-512.png"), 512, bg=FG, fg=BG)
+    write_png(os.path.join(log, "apple-touch-icon.png"), 180, padding=0.12, bg=FG, fg=BG)
 
 
 if __name__ == "__main__":

@@ -37,14 +37,18 @@ LOG_LAG_DAYS = 2     # a diary entry within this many days of the watch counts
 DEFAULT_TZ = "America/Chicago"
 
 
-def local_today():
+def user_zone():
     tz = os.environ.get("USER_TZ") or os.environ.get("NUDGE_TZ") or DEFAULT_TZ
     try:
         from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo(tz)).date()
+        return ZoneInfo(tz)
     except Exception:  # no tzdata on this runner: UTC is the best we have
-        print(f"apply_state: timezone {tz!r} unavailable, using the UTC date")
-        return date.today()
+        print(f"apply_state: timezone {tz!r} unavailable, using UTC")
+        return timezone.utc
+
+
+def local_today():
+    return datetime.now(user_zone()).date()
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -213,7 +217,8 @@ def apply(d, rows, today=None):
             continue
         if ts > 1e11:
             ts /= 1000.0                       # revisions are milliseconds
-        day = datetime.fromtimestamp(ts, timezone.utc).date().isoformat() if ts else today
+        # the revision is a UTC epoch; the watch happened on your calendar day
+        day = datetime.fromtimestamp(ts, user_zone()).date().isoformat() if ts else today
         if day < cutoff or tid in have:
             continue
         d0 = datetime.strptime(day, "%Y-%m-%d").date()

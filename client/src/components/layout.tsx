@@ -20,6 +20,8 @@ import {
   Library,
   Search,
   Dices,
+  MessageCircle,
+  PenLine,
 } from "lucide-react";
 import {
   Sheet,
@@ -160,6 +162,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/", label: "Today", icon: Clapperboard, match: (p) => p === "/" },
+  { href: "/talk", label: "Talk", icon: MessageCircle, match: (p) => p.startsWith("/talk") },
   { href: "/week", label: "Week", icon: CalendarDays, match: (p) => p === "/week" || p.startsWith("/week/") },
   { href: "/queue", label: "Queue", icon: ListVideo, match: (p) => p.startsWith("/queue") },
   { href: "/deepcuts", label: "Deep Cuts", icon: Dices, match: (p) => p.startsWith("/deepcuts") },
@@ -177,7 +180,7 @@ const NAV: NavItem[] = [
 ];
 
 // Mobile bottom bar shows these 4; the rest live in the "More" sheet.
-const MOBILE_PRIMARY = ["/", "/week", "/queue", "/background"];
+const MOBILE_PRIMARY = ["/", "/talk", "/week", "/queue"];
 
 function Logo() {
   return (
@@ -280,6 +283,15 @@ export function Layout({ children }: { children: ReactNode }) {
               ⌘K
             </kbd>
           </button>
+          {/* The Log app is its own page (and its own home-screen app), not a route. */}
+          <a
+            href="/log/"
+            data-testid="link-log"
+            className="mt-2 flex w-full items-center gap-2.5 rounded-sm bg-primary px-3 py-2 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            <PenLine className="h-3.5 w-3.5" />
+            Log a film
+          </a>
         </div>
 
         {/* min-h-0 + overflow lets the nav scroll on short viewports instead of
@@ -339,6 +351,15 @@ export function Layout({ children }: { children: ReactNode }) {
             <span className="font-serif text-lg text-foreground">Cineprompt</span>
           </div>
         </Link>
+        <div className="flex items-center gap-2">
+        <a
+          href="/log/"
+          data-testid="link-log-mobile"
+          className="inline-flex items-center gap-1.5 rounded-sm bg-primary px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-primary-foreground"
+        >
+          <PenLine className="h-3.5 w-3.5" />
+          Log
+        </a>
         <button
           onClick={openSearch}
           aria-label="Search the library"
@@ -348,6 +369,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <Search className="h-3.5 w-3.5" />
           Search
         </button>
+        </div>
       </header>
 
       {/* Main */}

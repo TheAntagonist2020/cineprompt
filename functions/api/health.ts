@@ -1,6 +1,6 @@
 // /api/health — is the backend actually wired up? The client shows this in the
 // sidebar so a broken binding is visible instead of silently hiding features.
-//   GET -> { ok, db: "ready" | "missing" | "error", rows, email, error? }
+//   GET -> { ok, db: "ready" | "missing" | "error", rows, email, sync, talk, error? }
 import { ensureSchema, liveRowCount } from "./state";
 
 export const onRequestGet = async (context: any) => {
@@ -17,5 +17,6 @@ export const onRequestGet = async (context: any) => {
     }
   }
   out.sync = env?.GITHUB_TOKEN ? "configured" : "missing";
+  out.talk = env?.ANTHROPIC_API_KEY ? "configured" : "missing";
   return Response.json(out);
 };

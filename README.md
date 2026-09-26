@@ -4,7 +4,7 @@ A personal film dashboard for Dalton Johnson ([daltonjohnson](https://letterboxd
 
 Your choices in the app — **Shortlist**, **Not tonight**, **Watched** — are saved on the device first and mirrored to a Cloudflare D1 store, so they survive a reload, a rebuild, and a switch from phone to TV. The pipeline reads them back (see [DEPLOY.md](DEPLOY.md#let-the-pipeline-see-your-in-app-choices)) so the phone nudge and the Stremio row agree with the app.
 
-The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and three small Pages Functions (`/api/state`, `/api/health`, `/api/sync`, in `functions/api/`) provide the only runtime backend: a D1 table for your choices and a trigger for the rebuild workflow. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
+The app is a **static single-page app**: all content is precomputed by a Python pipeline into one `client/public/data.json` file. At build time that file is split into a small core payload plus lazily-fetched, route-scoped shards (see [Data payload](#data-payload)), which the React client loads on demand. In production, Cloudflare Pages serves the client and a handful of Pages Functions (`/api/state`, `/api/health`, `/api/sync`, `/api/chat`, `/api/log`, in `functions/api/`) provide the only runtime backend: D1 tables for your choices, Talk conversations and Log entries, a trigger for the rebuild workflow, and the Claude calls. The Express server is for local development only and serves the built client with no API; the app degrades to device-local state when the functions are absent.
 
 Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library — every film in every filmography, collection, and canon list, plus directors and collections by name.
 
@@ -68,16 +68,30 @@ a bot challenge, so the pipeline deliberately never scrapes it.
 Trakt, if configured, is layered on top: its watched set is unioned in, its
 ratings fill gaps Letterboxd hasn't rated. Where both rate a film, Letterboxd wins.
 
-**A watch is not a diary entry.** A Trakt scrobble, or tapping **Watched** in
-the app, records that you saw something — it does not write your diary. The
-pipeline lists every recent watch that has no Letterboxd entry within two days
-of it (`unlogged`), and the app prompts for the entry everywhere it matters:
-a "Watched, not in your diary" box at the top of Today with a **Log it** button
-per film, a **Log it on Letterboxd** link the moment you mark a film watched, a
-**Log it** badge on the Tracking rows, and the phone nudge leads with
-"*watched, not logged*" and a Log button (the 9pm follow-up sends that reminder
-too, instead of staying silent). Once you log it, the next run's RSS pass sees
-the entry and the prompt clears itself.
+**A Trakt play is not a watch.** Stremio scrobbles a title to Trakt whenever
+it is opened, including to check the Plex library, so the pipeline treats
+recent Trakt titles with no Letterboxd entry (`unlogged`) as questions, not
+facts. Today shows them as *Did you watch these?*: **Log it** opens the Log
+app on that film, and the X records *just a check* in D1 so the title never
+comes up again on any device. The 7:30pm nudge counts from the diary, not
+Trakt, and the 9pm run is a nightly check-in (*Watch anything today?*, the
+Log app one tap away) that stays silent when the diary already has today.
+There is no push per scrobble.
+
+With IFTTT wired in (see [DEPLOY.md](DEPLOY.md#on-the-minute-ifttt)), the
+timed runs fire on the minute instead of whenever GitHub gets to them.
+
+**Talk** is a conversation with Claude that has read the whole Letterboxd diary
+(every film, date, star rating, tag and review opening). The build writes that
+memory to `data/memory.txt` from `data.json`; `/api/chat` streams the replies and
+keeps conversations in D1. It needs an `ANTHROPIC_API_KEY` secret on the Pages
+project (see [DEPLOY.md](DEPLOY.md#turn-on-talk-claude-with-your-whole-diary)).
+
+**Log** (`/log/`) is a separate installable app for getting films into the
+Letterboxd diary: stars, a few words (typed or spoken), a review drafted by
+Claude in your own voice, then copy and open Letterboxd. It keeps a "still to
+write up" list for stars-only logs and remembers titles Stremio opened that were
+only library checks.
 
 Levels of refresh, lightest to heaviest:
 
@@ -216,12 +230,16 @@ client/          React SPA
   public/sw.js       service worker (offline + instant repeat loads)
   src/pages/         one file per route (today, queue, directors, ...)
   src/components/tonight.tsx  the one-pick "Tonight" hero on Today
+  src/pages/talk.tsx          Talk: chat with Claude over the whole diary
+  log/index.html     the Log app's page (its own manifest + icons in public/log/)
+  src/log/           the Log app: film -> stars -> words -> review in your voice
   src/lib/filmState.tsx       local-first film state (Shortlist / Not tonight / Watched), mirrored to D1
   src/lib/data.ts    data types + core/shard loaders + helpers
   src/lib/mood.tsx   mood-engine pick logic
   src/components/command-palette.tsx  ⌘K search over the whole library
 script/
   data-shards.ts     splits data.json into core + lazy shards (build step)
+  film-memory.ts     the Letterboxd diary as plain text, Claude's context for Talk
   make_icons.py      regenerates the favicon / PWA icons from the reel logo
 server/          Express app (index, routes, static, vite middleware)
 datagen/         Python data pipeline (TMDB / Trakt / Letterboxd)
