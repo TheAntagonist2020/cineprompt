@@ -26,6 +26,7 @@ const Weeks = lazy(() => import("@/pages/weeks"));
 const Craft = lazy(() => import("@/pages/craft"));
 const Tags = lazy(() => import("@/pages/tags"));
 const DeepCuts = lazy(() => import("@/pages/deepcuts"));
+const Nocturne = lazy(() => import("@/pages/nocturne"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function AppRouter() {
@@ -58,6 +59,7 @@ function AppRouter() {
             <Route path="/craft" component={Craft} />
             <Route path="/tags" component={Tags} />
             <Route path="/deepcuts" component={DeepCuts} />
+            <Route path="/nocturne" component={Nocturne} />
             <Route component={NotFound} />
           </Switch>
         </Suspense>

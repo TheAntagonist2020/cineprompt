@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { Search, Check, CornerDownLeft, Loader2, Users, Library, Film } from "lucide-react";
+import { Search, Check, CornerDownLeft, Loader2, Users, Library, Film, Moon } from "lucide-react";
 import {
   useShard,
   posterUrl,
   letterboxdTmdbUrl,
   type SearchFilmRow,
 } from "@/lib/data";
+import { readImmersion, writeImmersion } from "@/lib/nocturne";
 
 /**
  * Global search over the whole library — every film the app knows about
@@ -45,6 +46,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
   const [, navigate] = useLocation();
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
+  const [immersion, setImmersion] = useState(readImmersion);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -136,10 +138,36 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
       e.preventDefault();
       const r = results[active];
       if (r) open(r);
+      else if (commands[0]) runCommand(commands[0].id);
     }
   }
 
-  const showHint = q.trim().length < 2;
+  const needle = q.trim().toLowerCase();
+  const showHint = needle.length < 2;
+  const commands = [
+    {
+      id: "open",
+      label: "Nocturne (Zero-Scroll)",
+      hint: "Put something on now",
+      show: !needle || /nocturne|zero-scroll|zero scroll|put something/.test(needle),
+    },
+    {
+      id: "immersion",
+      label: immersion ? "Subtitles on · leave immersion" : "Subtitle-Free Immersion",
+      hint: "Toggle Nocturne subtitles off",
+      show: !needle || /subtitle|immersion|nocturne|silent/.test(needle),
+    },
+  ].filter((command) => command.show);
+
+  function runCommand(id: string) {
+    if (id === "immersion") {
+      const next = !readImmersion();
+      writeImmersion(next);
+      setImmersion(next);
+    }
+    navigate("/nocturne");
+    onClose();
+  }
 
   return (
     <div
@@ -179,6 +207,27 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
         </div>
 
         <div ref={listRef} className="max-h-[52vh] overflow-y-auto">
+          {commands.length > 0 && (showHint || /nocturne|subtitle|immersion/.test(needle)) && (
+            <div className="border-b border-border">
+              {commands.map((command) => (
+                <button
+                  key={command.id}
+                  onClick={() => runCommand(command.id)}
+                  data-testid={`command-${command.id === "open" ? "nocturne" : "nocturne-immersion"}`}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-primary/10"
+                >
+                  <Moon className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-serif text-[15px]">{command.label}</span>
+                    <span className="block font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                      {command.hint}
+                    </span>
+                  </span>
+                  <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+                </button>
+              ))}
+            </div>
+          )}
           {showHint && (
             <p className="px-4 py-8 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
               {shard

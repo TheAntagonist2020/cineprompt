@@ -22,6 +22,7 @@ import {
   Dices,
   MessageCircle,
   PenLine,
+  Moon,
 } from "lucide-react";
 import {
   Sheet,
@@ -162,6 +163,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/", label: "Today", icon: Clapperboard, match: (p) => p === "/" },
+  { href: "/nocturne", label: "Nocturne (Zero-Scroll)", icon: Moon, match: (p) => p.startsWith("/nocturne") },
   { href: "/talk", label: "Talk", icon: MessageCircle, match: (p) => p.startsWith("/talk") },
   { href: "/week", label: "Week", icon: CalendarDays, match: (p) => p === "/week" || p.startsWith("/week/") },
   { href: "/queue", label: "Queue", icon: ListVideo, match: (p) => p.startsWith("/queue") },
@@ -180,7 +182,7 @@ const NAV: NavItem[] = [
 ];
 
 // Mobile bottom bar shows these 4; the rest live in the "More" sheet.
-const MOBILE_PRIMARY = ["/", "/talk", "/week", "/queue"];
+const MOBILE_PRIMARY = ["/", "/nocturne", "/talk", "/queue"];
 
 function Logo() {
   return (
