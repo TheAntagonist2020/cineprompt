@@ -8,6 +8,39 @@ The app is a **static single-page app**: all content is precomputed by a Python 
 
 Press <kbd>⌘K</kbd> (or <kbd>/</kbd>) anywhere to search the whole library — every film in every filmography, collection, and canon list, plus directors and collections by name.
 
+## What to watch
+
+Two ways to choose, on Today:
+
+1. **The recommendation.** Tonight, the focus row, the queue, and deep cuts each carry the title, year, and a one-line reason, plus direct links into the Stremio and Plex accounts already signed in on that device.
+2. **A prompt.** Ask for a kind of movie — `70s horror`, or two interests joined with `or` (`Japanese crime or slow cinema`). Matches come from the films already picked for you. No API key. Each result has the same Stremio and Plex links.
+
+### Stremio
+
+The app link opens that exact title in the Stremio app:
+
+- Movies: `stremio:///detail/movie/{imdbId}`
+- Series: `stremio:///detail/series/{imdbId}`
+
+The current picks are movies, so they use the movie form. The same helpers use the series form when a title is a series.
+
+Stremio Web, for a browser that is already signed in:
+
+- Movies: `https://web.stremio.com/#/detail/movie/{imdbId}/{imdbId}`
+- Series: `https://web.stremio.com/#/detail/series/{imdbId}`
+
+### Plex
+
+Until Plex is connected, **Open in Plex** searches the account that is signed in at Plex Web:
+
+`https://app.plex.tv/desktop/#!/search?query={title}`
+
+**Connect Plex** (on the prompt) runs Plex's PIN sign-in. The token stays in this browser's localStorage and is never written into the repo. After that, a title that is on your server opens the item directly:
+
+`https://app.plex.tv/desktop/#!/server/{machineId}/details?key={/library/metadata/{ratingKey}}`
+
+(`key` is URL-encoded.) If it is not in the library, the button stays on the search link.
+
 ## Stack
 
 - **Client:** React 18, Vite 7, TypeScript, wouter (hash routing), Tailwind + shadcn/ui, framer-motion, Recharts

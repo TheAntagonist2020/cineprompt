@@ -1,4 +1,5 @@
 import type { AppData, QueueFilm } from "@/lib/data";
+import { plexSearchUrl, stremioNativeUrl, stremioWebUrl } from "@shared/watchLinks";
 
 /**
  * Nocturne — one locked film, a modulated marathon, and a private craft note.
@@ -423,15 +424,15 @@ export function craftStudy(film: NocturneFilm, notes: string): CraftStudy {
 }
 
 export function stremioNative(imdbId: string): string {
-  return `stremio:///detail/movie/${imdbId}`;
+  return stremioNativeUrl(imdbId, "movie");
 }
 
 export function stremioWeb(imdbId: string): string {
-  return `https://web.stremio.com/#/detail/movie/${imdbId}`;
+  return stremioWebUrl(imdbId, "movie");
 }
 
 export function plexSearch(title: string): string {
-  return `https://app.plex.tv/desktop/#!/search?query=${encodeURIComponent(title)}`;
+  return plexSearchUrl(title);
 }
 
 export const IMMERSION_STORAGE_KEY = "nocturne-subtitles-off";

@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import { ExternalLink, Star, StarHalf, X, Play, Repeat, Waves, Moon, Bookmark, BookmarkCheck, Check, RotateCcw } from "lucide-react";
+import { ExternalLink, Star, StarHalf, X, Repeat, Waves, Moon, Bookmark, BookmarkCheck, Check, RotateCcw } from "lucide-react";
 import { useFilmState, type FilmSnapshot } from "@/lib/filmState";
+import { AccountLinks } from "@/components/account-links";
 import {
   actionLinks,
   posterUrl,
@@ -259,37 +260,41 @@ export function RatingBar({
 export function ActionButtons({
   film,
   size = "default",
+  accounts = true,
 }: {
-  film: { tmdb_id: number; imdb_id?: string | null; title: string };
+  film: { tmdb_id: number; imdb_id?: string | null; title: string; year?: string | number | null };
   size?: "default" | "sm";
+  /** Stremio + Plex. Turn off when the card already shows AccountLinks. */
+  accounts?: boolean;
 }) {
-  const links: ActionLink[] = actionLinks(film);
+  const links: ActionLink[] = actionLinks(film).filter(
+    (l) => !accounts || (l.label !== "Stremio" && l.label !== "Stremio Web" && l.label !== "Plex"),
+  );
   const pad = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm";
   return (
     <div className="flex flex-wrap gap-2" data-testid="action-buttons">
-      {links.map((l) => {
-        const isStremio = l.label === "Stremio";
-        return (
-          <a
-            key={l.label}
-            href={l.href}
-            {...(l.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-            data-testid={`link-${l.label.toLowerCase()}-${film.tmdb_id}`}
-            className={`group inline-flex items-center gap-1.5 border ${pad} font-sans font-medium tracking-wide rounded-sm transition-colors duration-200 ${
-              isStremio
-                ? "border-primary/60 bg-primary/15 text-primary hover:bg-primary/25"
-                : "border-border bg-card/60 text-foreground/85 hover:border-primary/50 hover:text-primary"
-            }`}
-          >
-            {isStremio ? (
-              <Play className="h-3 w-3 fill-current" />
-            ) : (
-              <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100" />
-            )}
-            {l.label}
-          </a>
-        );
-      })}
+      {accounts && (
+        <AccountLinks
+          title={film.title}
+          year={film.year}
+          imdbId={film.imdb_id}
+          tmdbId={film.tmdb_id}
+          size={size}
+          bare
+        />
+      )}
+      {links.map((l) => (
+        <a
+          key={l.label}
+          href={l.href}
+          {...(l.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+          data-testid={`link-${l.label.toLowerCase().replace(/\s+/g, "-")}-${film.tmdb_id}`}
+          className={`group inline-flex items-center gap-1.5 border ${pad} font-sans font-medium tracking-wide rounded-sm transition-colors duration-200 border-border bg-card/60 text-foreground/85 hover:border-primary/50 hover:text-primary`}
+        >
+          <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+          {l.label}
+        </a>
+      ))}
     </div>
   );
 }

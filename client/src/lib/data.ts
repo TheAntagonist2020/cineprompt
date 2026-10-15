@@ -1,4 +1,9 @@
 import { useEffect, useState } from "react";
+import {
+  plexSearchUrl as plexSearchHref,
+  stremioNativeUrl,
+  stremioWebUrl as stremioWebHref,
+} from "@shared/watchLinks";
 
 // ---------- Types ----------
 export interface User {
@@ -684,18 +689,23 @@ export function actionLinks(opts: {
   const q = encodeURIComponent(opts.title);
   const links: ActionLink[] = [];
   if (opts.imdb_id) {
-    // The web link opens everywhere and hands off to the Stremio app where it
-    // is installed; the bare stremio:// scheme fails silently on phones
-    // without it, which is how a "play" button ends up doing nothing.
+    // Native scheme opens the title in the Stremio app already signed in.
+    // The HTTPS link is the same title in Stremio Web when the app scheme
+    // has nothing to hand off to.
     links.push({
       label: "Stremio",
       href: stremioUrl(opts.imdb_id),
+      external: false,
+    });
+    links.push({
+      label: "Stremio Web",
+      href: stremioWebUrl(opts.imdb_id),
       external: true,
     });
   }
   links.push({
     label: "Plex",
-    href: `https://app.plex.tv/desktop#!/search?query=${q}`,
+    href: plexSearchUrl(opts.title),
     external: true,
   });
   links.push({
@@ -717,7 +727,15 @@ export function actionLinks(opts: {
 }
 
 export function stremioUrl(imdb_id: string): string {
-  return `https://web.stremio.com/#/detail/movie/${imdb_id}/${imdb_id}`;
+  return stremioNativeUrl(imdb_id, "movie");
+}
+
+export function stremioWebUrl(imdb_id: string): string {
+  return stremioWebHref(imdb_id, "movie");
+}
+
+export function plexSearchUrl(title: string): string {
+  return plexSearchHref(title);
 }
 
 // ---------- TMDB / search links ----------

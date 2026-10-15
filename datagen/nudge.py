@@ -347,7 +347,7 @@ def stremio_url(film, web=False):
         return None
     if web:
         return f"https://web.stremio.com/#/detail/movie/{imdb}/{imdb}"
-    return f"stremio:///detail/movie/{imdb}/{imdb}"
+    return f"stremio:///detail/movie/{imdb}"
 
 
 def poster_url(film, size="w500"):

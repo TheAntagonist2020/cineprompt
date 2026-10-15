@@ -13,6 +13,8 @@ import {
   type QueueFilm,
 } from "@/lib/data";
 import { TonightHero } from "@/components/tonight";
+import { WatchPrompt } from "@/components/watch-prompt";
+import { AccountLinks } from "@/components/account-links";
 import { UnloggedPrompt } from "@/components/unlogged";
 import {
   Poster,
@@ -250,6 +252,8 @@ export default function Today() {
           />
         )}
 
+        <WatchPrompt data={data} hidden={fs.isHidden} onOpen={(film) => modal.open(film)} />
+
         {/* FOCUS */}
         <section className="mb-14" key={`focus-${moodKey}`} >
           <div className="animate-in fade-in duration-200">
@@ -341,6 +345,14 @@ export default function Today() {
                       </li>
                     ))}
                   </ul>
+                  <div className="mt-4">
+                    <AccountLinks
+                      title={data.wildcard.title}
+                      year={data.wildcard.year}
+                      imdbId={data.wildcard.imdb_id}
+                      tmdbId={data.wildcard.tmdb_id}
+                    />
+                  </div>
                 </div>
               </div>
             </div>

@@ -17,6 +17,7 @@ import { LoadingScreen, PageShell } from "@/components/layout";
 import { MoodStrip } from "@/components/mood-strip";
 import { useMood, moodMetaByIds, moodPicks } from "@/lib/mood";
 import { ChevronDown } from "lucide-react";
+import { AccountLinks } from "@/components/account-links";
 
 function decadeOf(year: string): string {
   const y = parseInt(year, 10);
@@ -220,6 +221,17 @@ function QueueRow({
           <div className="mt-4 max-w-xs">
             <RatingBar value={film.vote_average} count={film.vote_count} />
           </div>
+
+          {!expanded && (
+            <div className="mt-4">
+              <AccountLinks
+                title={film.title}
+                year={film.year}
+                imdbId={film.imdb_id}
+                tmdbId={film.tmdb_id}
+              />
+            </div>
+          )}
 
           <button
             onClick={onToggle}
