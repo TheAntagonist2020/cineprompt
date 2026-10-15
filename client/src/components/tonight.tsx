@@ -1,11 +1,7 @@
-import { Play, ExternalLink, ChevronRight } from "lucide-react";
-import {
-  actionLinks,
-  formatRuntime,
-  languageName,
-  type QueueFilm,
-} from "@/lib/data";
+import { ChevronRight } from "lucide-react";
+import { formatRuntime, languageName, type QueueFilm } from "@/lib/data";
 import { Poster, KenBurnsBackdrop, FilmActions } from "@/components/film-ui";
+import { AccountLinks } from "@/components/account-links";
 
 /**
  * The one decision the app exists to make. Everything else on Today is
@@ -26,9 +22,6 @@ export function TonightHero({
   source: "shortlist" | "slate" | "mood";
   onOpen: () => void;
 }) {
-  const links = actionLinks(film);
-  const stremio = links.find((l) => l.label === "Stremio");
-  const others = links.filter((l) => l.label !== "Stremio");
   const kicker =
     source === "shortlist"
       ? "Tonight · from your shortlist"
@@ -91,31 +84,15 @@ export function TonightHero({
             </ul>
           )}
 
-          {/* Where to watch */}
-          <div className="mt-6 flex flex-wrap gap-2">
-            {stremio && (
-              <a
-                href={stremio.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid={`tonight-play-${film.tmdb_id}`}
-                className="inline-flex items-center gap-2 rounded-sm bg-primary px-5 py-2.5 font-sans text-sm font-semibold tracking-wide text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                <Play className="h-4 w-4 fill-current" /> Play in Stremio
-              </a>
-            )}
-            {others.map((l) => (
-              <a
-                key={l.label}
-                href={l.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid={`tonight-link-${l.label.toLowerCase()}-${film.tmdb_id}`}
-                className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-card/60 px-3.5 py-2.5 font-sans text-sm font-medium tracking-wide text-foreground/85 hover:border-primary/50 hover:text-primary transition-colors"
-              >
-                <ExternalLink className="h-3 w-3 opacity-60" /> {l.label}
-              </a>
-            ))}
+          <div className="mt-6" data-testid={`tonight-play-${film.tmdb_id}`}>
+            <AccountLinks
+              title={film.title}
+              year={film.year}
+              imdbId={film.imdb_id}
+              tmdbId={film.tmdb_id}
+              size="default"
+              primaryLabel="Play in Stremio"
+            />
           </div>
 
           {/* Decide */}

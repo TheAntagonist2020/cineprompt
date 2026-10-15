@@ -24,6 +24,18 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+function redactSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = /token|secret|password|authorization/i.test(key) ? "[redacted]" : redactSecrets(inner);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -51,7 +63,7 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        logLine += ` :: ${JSON.stringify(redactSecrets(capturedJsonResponse))}`;
       }
 
       log(logLine);

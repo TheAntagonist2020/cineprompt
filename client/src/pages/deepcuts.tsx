@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Shuffle, Dices } from "lucide-react";
 import { useAppData, formatRuntime, type DeepCutFilm } from "@/lib/data";
 import { FocusCard, FilmDetailModal, useFilmModal, Poster, GenreTags } from "@/components/film-ui";
+import { AccountLinks } from "@/components/account-links";
 import { LoadingScreen, PageShell } from "@/components/layout";
 import { useFilmState } from "@/lib/filmState";
 
@@ -112,6 +113,14 @@ export default function DeepCuts() {
                 {wildcard.overview}
               </p>
             )}
+            <div className="mt-4">
+              <AccountLinks
+                title={wildcard.title}
+                year={wildcard.year}
+                imdbId={wildcard.imdb_id}
+                tmdbId={wildcard.tmdb_id}
+              />
+            </div>
           </div>
         </div>
       </div>

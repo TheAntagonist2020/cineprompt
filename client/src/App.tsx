@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout, LoadingScreen } from "@/components/layout";
 import { MoodProvider } from "@/lib/mood";
 import { FilmStateProvider } from "@/lib/filmState";
+import { PlexProvider } from "@/lib/plexSession";
 // Today is the landing route — keep it in the main bundle so first paint
 // never waits on a second chunk. Every other page loads on demand.
 import Today from "@/pages/today";
@@ -72,6 +73,7 @@ function App() {
   return (
     <TooltipProvider>
       <FilmStateProvider>
+        <PlexProvider>
         <MoodProvider>
           <Router hook={useHashLocation}>
             <Layout>
@@ -79,6 +81,7 @@ function App() {
             </Layout>
           </Router>
         </MoodProvider>
+        </PlexProvider>
       </FilmStateProvider>
     </TooltipProvider>
   );
